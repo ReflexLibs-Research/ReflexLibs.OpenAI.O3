@@ -1,4 +1,4 @@
-# ReflexLibs.OpenAI.O3  
+# ReflexLibs.OpenAI.o3  
 **Reflex Libs – Extended Technical Reconnaissance**  
 **Version Draft 4 – 5 May 2025**
 
