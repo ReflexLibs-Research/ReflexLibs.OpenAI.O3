@@ -1,0 +1,2434 @@
+---
+(.md Markdown output for Github)
+I am providing:
+
+
+(.md Markdown output for Github)
+• Twenty Eight representative C++ source files from the closed-source “Reflex Libs” project (below).   
+• A plain-text list of all filenames in the repository. (ReflexLibsFile.txt) And Code line count (lineCount.txt)
+
+**Please prepare an objective technical report titled**  
+“Reflex Libs – Extended Technical Reconnaissance — Version Draft 4 (5 May 2025)”  
+**for Risk Evolution Reflex Libs Stake-holders**.
+**In a .md github markdown style for downloading and depositing in a Github repository**
+
+(.md Markdown output for Github)
+### Style & Tone
+- Maintain a **neutral, evidence-based tone**.  
+- Highlight empirical results **alongside underlying test assumptions and limitations**.  
+- Avoid marketing language; use cautious phrasing like “in our benchmark”, “appears to”, “under these conditions”.  
+- No client or counterparty names—only “Reflex Libs Stake-holders & Trading Floor”.
+(.md Markdown output for Github)
+
+### Mandatory Content 30-40 pages 
+Include every heading in this Table of Contents:
+(.md Markdown output for Github)
+
+1. Introduction & Scope  
+2. Source-Code Artefacts Received  
+3. Core Infrastructure Layers  
+   3.1 Calendar & Date Engine  
+   3.2 Accrual Construction  
+   3.3 Leg & Cash-Flow Generation  
+   3.4 Cross Currency Swaps
+   3.5 Quanto Swaps
+   3.6 Hybrid / Exotic Swaps
+4. Market Infrastructure  
+   4.1 Discount & Projection Curves  
+   4.2 Inflation Curves & Seasonality  
+   4.3 Pricing Context & Environments  
+5. Analytics & Model Library  
+   5.1 Heston End-to-End Walk-Through (summarise key flow; detailed code in appendix)  
+   5.2 HestonNormal Variant  
+   5.3 Calibration Frameworks  
+   5.4 Monte-Carlo Engine & Timing  
+   5.5 Spline Accuracy Study  
+6. Risk & Sensitivity Matrix  
+7. Bond-Future & Deliverables Add-ins  
+8. Service Layer & Serialization  
+9. Build / DevOps Footprint  
+10. Performance Benchmarks vs. Open Source  
+11. Recommendations & AI-Extension Roadmap  
+12. Appendix: File-Level Observations  
+
+### Key Facts that must appear (quote exact numbers)
+-  adds deep-research results for Monte-Carlo performance
+- **Monte-Carlo timing table** 
+- **Spline accuracy table**  note on Fritsch–Butland slopes.  
+- **Analytic pricing table** (Heston 84 ns vs. 710 ns; speed-up 8.5×).  
+- **AI-Extension roadmap** must mention: fine-tune internal LLM to auto-generate SIMD kernels for an upcoming AVX-512 port.
+(.md Markdown output for Github)
+
+### Transparency
+- Clearly state hardware / compiler settings and any other assumptions.  
+- Mention that results are *point-in-time* and may vary on different architectures or compiler flags.
+(.md Markdown output for Github)
+
+### Approximate number of man years of London/New York Expirienced C++ Investment Bank Developers (and total cost)
+(.md Markdown output for Github)
+
+**Please output the full report in Markdown, preserving tables and bold emphasis where given above.**
+
+
+
+
+--- AccrualConstructionCentralBank.cpp ---
+#include "AccrualConstructionCentralBank.h"
+
+#include "AccrualInterface.h"
+
+#include <reflex_component_factory/CentralBank.h>
+#include <reflex_schedule_generation/CentralBank.h>
+#include <reflex_schedule/Schedule.h>
+#include <reflex_component/CentralBank.h>
+#include <reflex_xml/serialization/Deserialize.h>
+#include <reflex_xml/serialization/Serialize.h>
+
+using std::shared_ptr;
+using std::string;
+using std::string_view;
+
+namespace RiskEvolution::Reflex::Accruals
+{
+namespace
+{
+struct LocalAccrualCentralBank : Accruals::CentralBankInterface
+{
+    explicit LocalAccrualCentralBank( CentralBank const& cb ) : m_central_bank( cb ) { }
+
+    Schedule generate( Date start, Date end ) const override { return Reflex::generate( start, end, m_central_bank ); }
+
+    CentralBank const& central_bank( ) const override { return m_central_bank; }
+
+    [[maybe_unused]] static inline struct Initialize
+    {
+        Initialize( )
+        {
+            add_dom_deserialization_function(
+                "CentralBank",
+                []( DOMElement dom_element, string_view ) -> Accruals::Accrual
+                {
+                    return Accruals::make_and_cache_central_bank( Reflex::dom_deserialize<CentralBank const&>( "CentralBank", dom_element ) );
+                }
+            );
+        }
+    } m_initialize;
+
+    void dom_serialize( DOMElement dom_element ) const override { Reflex::dom_serialize( dom_element, make_sob( "CentralBank", m_central_bank.name( ) ) ); }
+
+    string to_string( ) const override
+    {
+        string result;
+
+        result += "<CentralBank>" + m_central_bank.name( ) + "</CentralBank>";
+
+        return result;
+    }
+
+    CentralBank const& m_central_bank;
+};
+}
+
+shared_ptr<CentralBankInterface const> make_and_cache_central_bank( CentralBank const& central_bank ) { return std::make_shared<LocalAccrualCentralBank const>( central_bank ); }
+}
+
+
+--- AccrualConstructionTenorMonthly.h ---
+#pragma once
+
+#include "reflex_accrual_creation_export.h"
+
+#include "ForwardDeclarations.h"
+
+#include <reflex_accrual/ForwardDeclarations.h>
+#include <reflex_date_adjuster/ForwardDeclarations.h>
+#include <reflex_tenor/ForwardDeclarations.h>
+#include <reflex_date/ForwardDeclarations.h>
+#include <reflex_financial_basic/StubType.h>
+
+namespace RiskEvolution::Reflex::Accruals
+{
+
+// This can only be used for monthly an annual tenors
+REFLEX_ACCRUAL_CREATION_EXPORT std::shared_ptr<UnadjustedTenorWithTargetDayOfMonthInterface const> make_unadjusted_tenor_with_target_day_of_month(
+    Tenor,
+    StubType,
+    DayOfMonth
+); // Target day of month
+
+REFLEX_ACCRUAL_CREATION_EXPORT std::shared_ptr<AdjustedTenorWithTargetDayOfMonthInterface const> make_adjusted_tenor_with_target_day_of_month(
+    Tenor,
+    StubType,
+    DateAdjuster const&,
+    DateAdjuster const&,
+    DayOfMonth
+); // Target day of week, the default start date of week is used
+
+}
+
+
+--- Analytics.cpp ---
+#include <test/Test.h>
+
+#include <test/utilities/analytics_calibration_curves/Bates.h>
+#include <test/utilities/analytics_calibration_curves/BatesShifted.h>
+#include <test/utilities/analytics_calibration_curves/Black.h>
+#include <test/utilities/analytics_calibration_curves/BlackShifted.h>
+#include <test/utilities/analytics_calibration_curves/CEV.h>
+#include <test/utilities/analytics_calibration_curves/Heston.h>
+#include <test/utilities/analytics_calibration_curves/HestonShifted.h>
+#include <test/utilities/analytics_calibration_curves/Kirk.h>
+#include <test/utilities/analytics_calibration_curves/SABR.h>
+#include <test/utilities/analytics_calibration_curves/SABRShifted.h>
+#include <test/utilities/binary/BinaryRoundTrip.h>
+#include <test/utilities/xml/XMLRoundTrip.h>
+
+#include <reflex_environment_creation/Create.h>
+#include <reflex_environment/Environment.h>
+#include <reflex_environment_data/Data.h>
+#include <reflex_market/Create.h>
+#include <reflex_environment_id/DualAssetId.h>
+#include <reflex_environment_id/OptionModelId.h>
+#include <reflex_model_creation/BatesLognormal.h>
+#include <reflex_model_creation/BatesShiftedLognormal.h>
+#include <reflex_model_creation/BlackLognormal.h>
+#include <reflex_model/Model.h>
+#include <reflex_model/SingleAssetModel.h>
+#include <reflex_analytic_calibration_curve/BatesInterface.h>
+#include <reflex_analytic_calibration_curve/BatesShiftedInterface.h>
+#include <reflex_analytic_calibration_curve/BlackInterface.h>
+#include <reflex_analytic_calibration_curve/BlackShiftedInterface.h>
+#include <reflex_analytic_calibration_curve/CEVInterface.h>
+#include <reflex_analytic_calibration_curve/HestonInterface.h>
+#include <reflex_analytic_calibration_curve/HestonShiftedInterface.h>
+#include <reflex_analytic_calibration_curve/KirkInterface.h>
+#include <reflex_analytic_calibration_curve/SABRInterface.h>
+#include <reflex_analytic_calibration_curve/SABRShiftedInterface.h>
+#include <reflex_date/DateTime.h>
+
+using std::shared_ptr;
+
+namespace RiskEvolution::Reflex::Tests
+{
+using Environments::DualAssetId;
+using Environments::OptionModelId;
+
+// Bates
+
+TEST_CASE( "environment_bates_lognormal" )
+{
+    shared_ptr<Analytics::SingleAssetModel const> const model_1 { Analytics::Bates::Lognormal::make_model( make_bates_calibration_curve_flat_1( ) ) };
+    shared_ptr<Analytics::SingleAssetModel const> const model_2 { Analytics::Bates::Lognormal::make_model( make_bates_calibration_curve_term_structure_1( ) ) };
+
+    auto const environment {
+        Environments::make_environment(
+            {.m_market { Markets::make_market( { .m_date_time { DateTime { 20140422_ymd } } } ) },
+                                .m_option_models {
+                                { make_option_model_id( InstrumentId( "Deposit.GBP.LIBOR.M.3" ) ), model_1 }, { make_option_model_id( InstrumentId( "Deposit.USD.LIBOR.M.3" ) ), model_2 } }}
+        )
+    };
+
+    REQUIRE( environment->option_model( make_option_model_id( InstrumentId( "Deposit.GBP.LIBOR.M.3" ) ) ).get( ) == model_1.get( ) );
+    REQUIRE( environment->option_model( make_option_model_id( InstrumentId( "Deposit.USD.LIBOR.M.3" ) ) ).get( ) == model_2.get( ) );
+
+    binary_round_trip( environment );
+    xml_round_trip( environment );
+}
+
+TEST_CASE( "environment_bates_lognormal_shifted" )
+{
+    shared_ptr<Analytics::SingleAssetModel const> const model_1 { Analytics::BatesShifted::Lognormal::make_model( make_bates_shifted_calibration_curve_flat_1( ) ) };
+    shared_ptr<Analytics::SingleAssetModel const> const model_2 { Analytics::BatesShifted::Lognormal::make_model( make_bates_shifted_calibration_curve_flat_2( ) ) };
+
+    auto const environment {
+        Environments::make_environment(
+            {.m_market { Markets::make_market( { .m_date_time { DateTime { 20140422_ymd } } } ) },
+                                .m_option_models {
+                                { make_option_model_id( InstrumentId( "Deposit.GBP.LIBOR.M.3" ) ), model_1 }, { make_option_model_id( InstrumentId( "Deposit.USD.LIBOR.M.3" ) ), model_2 } }}
+        )
+    };
+
+    REQUIRE( environment->option_model( make_option_model_id( InstrumentId( "Deposit.GBP.LIBOR.M.3" ) ) ).get( ) == model_1.get( ) );
+    REQUIRE( environment->option_model( make_option_model_id( InstrumentId( "Deposit.USD.LIBOR.M.3" ) ) ).get( ) == model_2.get( ) );
+
+    binary_round_trip( environment );
+    xml_round_trip( environment );
+}
+
+/*
+TEST_CASE( "environment_bates_normal" )
+{
+    Environments::Data data;
+
+    auto const curve1 = make_bates_calibration_curve_flat_1( );
+    auto const curve2 = make_bates_calibration_curve_flat_2( );
+
+    data.m_bates_normal_curves[ Environments::SingleAssetId( f_instrument_id_deposit_gbp_libor_m_3 ) ] = curve1;
+    data.m_bates_normal_curves[ Environments::SingleAssetId( f_instrument_id_deposit_usd_libor_m_3 ) ] = curve2;
+
+    auto const environment = Environments::make_environment( DateTime( 20140422_ymd ), "", data );
+
+    REQUIRE( environment->bates_normal_curve( Environments::SingleAssetId( f_instrument_id_deposit_gbp_libor_m_3 ) ) == curve1 );
+    REQUIRE( environment->bates_normal_curve( Environments::SingleAssetId( f_instrument_id_deposit_usd_libor_m_3 ) ) == curve2 );
+
+    binary_round_trip( environment );
+    xml_round_trip( environment );
+}
+
+// Black
+
+TEST_CASE( "environment_black_lognormal" )
+{
+    Environments::Data data;
+
+    auto const curve1 = make_black_calibration_curve_flat_1( );
+    auto const curve2 = make_black_calibration_curve_flat_2( );
+
+    data.m_black_lognormal_curves[ Environments::SingleAssetId( f_instrument_id_deposit_gbp_libor_m_3 ) ] = curve1;
+    data.m_black_lognormal_curves[ Environments::SingleAssetId( f_instrument_id_deposit_usd_libor_m_3 ) ] = curve2;
+
+    auto const environment = Environments::make_environment( DateTime( 20140422_ymd ), "", data );
+
+    REQUIRE( environment->black_lognormal_curve( Environments::SingleAssetId( f_instrument_id_deposit_gbp_libor_m_3 ) ) == curve1 );
+    REQUIRE( environment->black_lognormal_curve( Environments::SingleAssetId( f_instrument_id_deposit_usd_libor_m_3 ) ) == curve2 );
+
+    binary_round_trip( environment );
+    xml_round_trip( environment );
+}
+
+TEST_CASE_METHOD( AnalyticsFixture, "environment_black_lognormal_shifted" )
+{
+    Environments::Data data;
+
+    auto const curve1 = make_black_shifted_calibration_curve_flat_1( );
+    auto const curve2 = make_black_shifted_calibration_curve_flat_2( );
+
+    data.m_black_lognormal_shifted_curves[ Environments::SingleAssetId( f_instrument_id_deposit_gbp_libor_m_3 ) ] = curve1;
+    data.m_black_lognormal_shifted_curves[ Environments::SingleAssetId( f_instrument_id_deposit_usd_libor_m_3 ) ] = curve2;
+
+    auto const environment = Environments::make_environment( DateTime( 20140422_ymd ), "", data );
+
+    REQUIRE( environment->black_lognormal_shifted_curve( Environments::SingleAssetId( f_instrument_id_deposit_gbp_libor_m_3 ) ) == curve1 );
+    REQUIRE( environment->black_lognormal_shifted_curve( Environments::SingleAssetId( f_instrument_id_deposit_usd_libor_m_3 ) ) == curve2 );
+
+    binary_round_trip( environment );
+    xml_round_trip( environment );
+}
+
+TEST_CASE_METHOD( AnalyticsFixture, "environemnt_black_normal" )
+{
+    Environments::Data data;
+
+    auto const curve1 = make_black_calibration_curve_flat_1( );
+    auto const curve2 = make_black_calibration_curve_flat_2( );
+
+    data.m_black_normal_curves[ Environments::SingleAssetId( f_instrument_id_deposit_gbp_libor_m_3 ) ] = curve1;
+    data.m_black_normal_curves[ Environments::SingleAssetId( f_instrument_id_deposit_usd_libor_m_3 ) ] = curve2;
+
+    auto const environment = Environments::make_environment( DateTime( 20140422_ymd ), "", data );
+
+    REQUIRE( environment->black_normal_curve( Environments::SingleAssetId( f_instrument_id_deposit_gbp_libor_m_3 ) ) == curve1 );
+    REQUIRE( environment->black_normal_curve( Environments::SingleAssetId( f_instrument_id_deposit_usd_libor_m_3 ) ) == curve2 );
+
+    binary_round_trip( environment );
+    xml_round_trip( environment );
+}
+
+// CEV
+
+TEST_CASE_METHOD( AnalyticsFixture, "enviroment_cev_lognormal" )
+{
+    Environments::Data data;
+
+    auto const curve1 = make_cev_calibration_curve_flat_1( );
+    auto const curve2 = make_cev_calibration_curve_flat_2( );
+
+    data.m_cev_curves[ Environments::SingleAssetId( f_instrument_id_deposit_gbp_libor_m_3 ) ] = curve1;
+    data.m_cev_curves[ Environments::SingleAssetId( f_instrument_id_deposit_usd_libor_m_3 ) ] = curve2;
+
+    auto const environment = Environments::make_environment( DateTime( 20140422_ymd ), "", data );
+
+    REQUIRE( environment->cev_curve( Environments::SingleAssetId( f_instrument_id_deposit_gbp_libor_m_3 ) ) == curve1 );
+    REQUIRE( environment->cev_curve( Environments::SingleAssetId( f_instrument_id_deposit_usd_libor_m_3 ) ) == curve2 );
+
+    binary_round_trip( environment );
+    xml_round_trip( environment );
+}
+
+// Heston
+
+TEST_CASE_METHOD( AnalyticsFixture, "enviroment_heston_lognormal" )
+{
+    Environments::Data data;
+
+    auto const curve1 = make_heston_calibration_curve_flat_1( );
+    auto const curve2 = make_heston_calibration_curve_flat_2( );
+
+    data.m_heston_lognormal_curves[ Environments::SingleAssetId( f_instrument_id_deposit_gbp_libor_m_3 ) ] = curve1;
+    data.m_heston_lognormal_curves[ Environments::SingleAssetId( f_instrument_id_deposit_usd_libor_m_3 ) ] = curve2;
+
+    auto const environment = Environments::make_environment( DateTime( 20140422_ymd ), "", data );
+
+    REQUIRE( environment->heston_lognormal_curve( Environments::SingleAssetId( f_instrument_id_deposit_gbp_libor_m_3 ) ) == curve1 );
+    REQUIRE( environment->heston_lognormal_curve( Environments::SingleAssetId( f_instrument_id_deposit_usd_libor_m_3 ) ) == curve2 );
+
+    binary_round_trip( environment );
+    xml_round_trip( environment );
+}
+
+TEST_CASE_METHOD( AnalyticsFixture, "enviroment_heston_lognormal_shifted" )
+{
+    Environments::Data data;
+
+    auto const curve1 = make_heston_shifted_calibration_curve_flat_1( );
+    auto const curve2 = make_heston_shifted_calibration_curve_flat_2( );
+
+    data.m_heston_lognormal_shifted_curves[ Environments::SingleAssetId( f_instrument_id_deposit_gbp_libor_m_3 ) ] = curve1;
+    data.m_heston_lognormal_shifted_curves[ Environments::SingleAssetId( f_instrument_id_deposit_usd_libor_m_3 ) ] = curve2;
+
+    auto const environment = Environments::make_environment( DateTime( 20140422_ymd ), "", data );
+
+    REQUIRE( environment->heston_lognormal_shifted_curve( Environments::SingleAssetId( f_instrument_id_deposit_gbp_libor_m_3 ) ) == curve1 );
+    REQUIRE( environment->heston_lognormal_shifted_curve( Environments::SingleAssetId( f_instrument_id_deposit_usd_libor_m_3 ) ) == curve2 );
+
+    binary_round_trip( environment );
+    xml_round_trip( environment );
+}
+
+TEST_CASE_METHOD( AnalyticsFixture, "enviroment_heston_normal" )
+{
+    Environments::Data data;
+
+    auto const curve1 = make_heston_calibration_curve_flat_1( );
+    auto const curve2 = make_heston_calibration_curve_flat_2( );
+
+    data.m_heston_normal_curves[ Environments::SingleAssetId( f_instrument_id_deposit_gbp_libor_m_3 ) ] = curve1;
+    data.m_heston_normal_curves[ Environments::SingleAssetId( f_instrument_id_deposit_usd_libor_m_3 ) ] = curve2;
+
+    auto const environment = Environments::make_environment( DateTime( 20140422_ymd ), "", data );
+
+    REQUIRE( environment->heston_normal_curve( Environments::SingleAssetId( f_instrument_id_deposit_gbp_libor_m_3 ) ) == curve1 );
+    REQUIRE( environment->heston_normal_curve( Environments::SingleAssetId( f_instrument_id_deposit_usd_libor_m_3 ) ) == curve2 );
+
+    binary_round_trip( environment );
+    xml_round_trip( environment );
+}
+
+// Kirk
+
+TEST_CASE_METHOD( AnalyticsFixture, "enviroment_kirk_lognorma" )
+{
+    Environments::Data data;
+
+    auto const curve1 = make_kirk_calibration_curve_flat_1( );
+    auto const curve2 = make_kirk_calibration_curve_flat_2( );
+
+    DualAssetId dual_asset_id_1( f_instrument_id_deposit_gbp_libor_m_3, f_instrument_id_deposit_jpy_libor_m_3 );
+    DualAssetId dual_asset_id_2( f_instrument_id_deposit_gbp_libor_m_3, f_instrument_id_deposit_usd_libor_m_3 );
+
+    data.m_kirk_lognormal_curves[ dual_asset_id_1 ] = curve1;
+    data.m_kirk_lognormal_curves[ dual_asset_id_2 ] = curve2;
+
+    auto const environment = Environments::make_environment( DateTime( 20140422_ymd ), "", data );
+
+    REQUIRE( environment->kirk_lognormal_curve( dual_asset_id_1 ) == curve1 );
+    REQUIRE( environment->kirk_lognormal_curve( dual_asset_id_2 ) == curve2 );
+
+    // Reverse Kirk should have the volatilities reversed and the same correlation
+
+    auto const curve_f = environment->kirk_lognormal_curve( dual_asset_id_1 );
+    auto const curve_r = environment->kirk_lognormal_curve( dual_asset_id_1.inverse( ) );
+
+    auto const calibration_f = curve_f->calibration( 10 );
+    auto const calibration_r = curve_r->calibration( 10 );
+
+    REQUIRE( calibration_f.volatility_1( ) == Catch::Approx(calibration_r.volatility_2( ) ) );
+    REQUIRE( calibration_f.volatility_2( ) == Catch::Approx(calibration_r.volatility_1( ) ) );
+    REQUIRE( calibration_f.rho( )          == Catch::Approx(calibration_r.rho( ) ) );
+
+  // TODO what about inverse curves
+    // REQUIRE( test_binary_round_trip( environment ) );
+}
+
+// SABR
+
+TEST_CASE_METHOD( AnalyticsFixture, "enviroment_sabr" )
+{
+    Environments::Data data;
+
+    auto const curve1 = make_sabr_calibration_curve_flat_1( );
+    auto const curve2 = make_sabr_calibration_curve_flat_2( );
+
+    data.m_sabr_curves[ Environments::SingleAssetId( f_instrument_id_deposit_gbp_libor_m_3 ) ] = curve1;
+    data.m_sabr_curves[ Environments::SingleAssetId( f_instrument_id_deposit_usd_libor_m_3 ) ] = curve2;
+
+    auto const environment = Environments::make_environment( DateTime( 20140422_ymd ), "", data );
+
+    REQUIRE( environment->sabr_curve( Environments::SingleAssetId( f_instrument_id_deposit_gbp_libor_m_3 ) ) == curve1 );
+    REQUIRE( environment->sabr_curve( Environments::SingleAssetId( f_instrument_id_deposit_usd_libor_m_3 ) ) == curve2 );
+
+    binary_round_trip( environment );
+    xml_round_trip( environment );
+}
+
+TEST_CASE_METHOD( AnalyticsFixture, "enviroment_sabr_shifted" )
+{
+    Environments::Data data;
+
+    auto const curve1 = make_sabr_shifted_calibration_curve_flat_1( );
+    auto const curve2 = make_sabr_shifted_calibration_curve_flat_2( );
+
+    data.m_sabr_shifted_curves[ Environments::SingleAssetId( f_instrument_id_deposit_gbp_libor_m_3 ) ] = curve1;
+    data.m_sabr_shifted_curves[ Environments::SingleAssetId( f_instrument_id_deposit_usd_libor_m_3 ) ] = curve2;
+
+    auto const environment = Environments::make_environment( DateTime( 20140422_ymd ), "", data );
+
+    REQUIRE( environment->sabr_shifted_curve( Environments::SingleAssetId( f_instrument_id_deposit_gbp_libor_m_3 ) ) == curve1 );
+    REQUIRE( environment->sabr_shifted_curve( Environments::SingleAssetId( f_instrument_id_deposit_usd_libor_m_3 ) ) == curve2 );
+
+    binary_round_trip( environment );
+    xml_round_trip( environment );
+}
+*/
+}
+
+--- BatesLognormalShifted.cpp ---
+#include "BatesLognormalShifted.h"
+
+#include "BatesShiftedRaw.h"
+#include "Price.h"
+
+#include <reflex_analytic_calibration/BatesShifted.h>
+#include <reflex_analytic_raw/BatesLognormalShifted.h>
+#include <reflex_option/OptionIntrinsicPrice.h>
+#include <reflex_utility/InputValidityCheckResult.h>
+
+namespace RiskEvolution::Reflex::Analytics::BatesShifted::Lognormal
+{
+// Price
+
+Price price_of_call( Calibration const& calibration, ForwardStrikeTimeToExpiry const& forward_strike_time_to_expiry )
+{
+    return Price(
+        invoke_raw_price_function( call_bates_shifted_raw_function, AnalyticsRaw::BatesShifted::Lognormal::price_of_call<double>, calibration, forward_strike_time_to_expiry )
+    );
+}
+
+Price price_of_put( Calibration const& calibration, ForwardStrikeTimeToExpiry const& forward_strike_time_to_expiry )
+{
+    return invoke_raw_price_function( call_bates_shifted_raw_function, AnalyticsRaw::BatesShifted::Lognormal::price_of_put<double>, calibration, forward_strike_time_to_expiry );
+}
+
+Price price( Calibration const& calibration, ForwardStrikeTimeToExpiry const& forward_strike_time_to_expiry, CallOrPut call_or_put )
+{
+    return invoke_call_or_put_function( price_of_call, price_of_put, calibration, forward_strike_time_to_expiry, call_or_put );
+}
+
+// Delta
+
+Delta delta_of_call( Calibration const& calibration, ForwardStrikeTimeToExpiry const& forward_strike_time_to_expiry )
+{
+    return Delta { call_bates_shifted_raw_function( calibration, forward_strike_time_to_expiry, AnalyticsRaw::BatesShifted::Lognormal::delta_of_call<double> ) };
+}
+
+Delta delta_of_put( Calibration const& calibration, ForwardStrikeTimeToExpiry const& forward_strike_time_to_expiry )
+{
+    return Delta { call_bates_shifted_raw_function( calibration, forward_strike_time_to_expiry, AnalyticsRaw::BatesShifted::Lognormal::delta_of_put<double> ) };
+}
+
+Delta delta( Calibration const& calibration, ForwardStrikeTimeToExpiry const& forward_strike_time_to_expiry, CallOrPut call_or_put )
+{
+    return Delta { invoke_call_or_put_function( delta_of_call, delta_of_put, calibration, forward_strike_time_to_expiry, call_or_put ) };
+}
+
+Gamma gamma( Calibration const& calibration, ForwardStrikeTimeToExpiry const& forward_strike_time_to_expiry )
+{
+    return Gamma { call_bates_shifted_raw_function( calibration, forward_strike_time_to_expiry, AnalyticsRaw::BatesShifted::Lognormal::gamma<double> ) };
+}
+
+Reflex::Theta theta_forward( Calibration const& calibration, ForwardStrikeTimeToExpiry const& forward_strike_time_to_expiry )
+{
+    return Reflex::Theta { call_bates_shifted_raw_function( calibration, forward_strike_time_to_expiry, AnalyticsRaw::BatesShifted::Lognormal::theta_forward<double> ) };
+}
+
+// Validity checks
+
+InputValidityCheckResult check_validity( Calibration const&, ForwardStrikeTimeToExpiry const&, CallOrPut ) { return { }; }
+}
+
+--- BinarySerialization.cpp ---
+#include "BinarySerialization.h"
+
+#include "Environment.h"
+
+#include <reflex_binary/ByteAppenders.h>
+#include <reflex_binary/ByteReaders.h>
+#include <reflex_utility/ReadFile.h>
+
+#if defined( INCLUDE_STD_LIB )
+    #include <fstream>
+#endif
+
+using std::shared_ptr;
+using std::span;
+using std::string;
+using std::vector;
+
+namespace RiskEvolution::Reflex::Environments
+{
+// Serialization
+
+vector<std::byte> serialize_to_data( Environment const& environment )
+{
+    vector<std::byte> bytes;
+
+    auto const byte_appender { make_byte_appender( bytes ) };
+
+    environment.append( *byte_appender );
+
+    return bytes;
+}
+
+size_t serialize_to_file( std::filesystem::path const& filename, Environment const& environment )
+{
+    std::fstream file( filename, std::ios::out | std::ios::binary );
+
+    if( file.good( ) == false )
+    {
+        throw std::runtime_error( "Failed to open file " + filename.string( ) + " for writing binary environment" );
+    }
+
+    auto const bytes { serialize_to_data( environment ) };
+
+    file.write( reinterpret_cast<char const*>( bytes.data( ) ), static_cast<std::streamsize>( bytes.size( ) ) );
+
+    return bytes.size( );
+}
+
+shared_ptr<Environment const> deserialize_from_data( std::byte const* bytes )
+{
+    auto const byte_reader { make_byte_reader( bytes ) };
+
+    return Environment::deserialize_from_bytes( *byte_reader );
+}
+
+shared_ptr<Environment const> deserialize_from_data( span<std::byte const> bytes ) { return deserialize_from_data( bytes.data( ) ); }
+
+shared_ptr<Environment const> deserialize_from_file( std::filesystem::path const& filename )
+{
+    auto const bytes { read_file_as_string( filename ) };
+
+    return deserialize_from_data( reinterpret_cast<std::byte const*>( bytes.data( ) ) );
+}
+}
+
+
+--- Calendar.h ---
+#pragma once
+
+#include "reflex_calendar_export.h"
+
+#include <reflex_date/ForwardDeclarations.h>
+#include <reflex_binary/Deserialize.h>
+#include <reflex_binary/HashableInterface.h>
+#include <reflex_binary/Serializable.h>
+#include <reflex_xml/serialization/Serializable.h>
+
+#if defined( INCLUDE_STD_LIB )
+    #include <memory>
+    #include <string>
+    #include <vector>
+#endif
+
+namespace RiskEvolution::Reflex
+{
+
+struct REFLEX_CALENDAR_EXPORT Calendar : HashableInterface, Serializable<std::unique_ptr<Calendar const>>, DOMSerializable<Calendar const&>
+{
+    virtual bool is_business_day( Date ) const = 0;
+    virtual bool is_holiday( Date ) const;
+
+    // These get all respective day inclusive on the start date but exclusive of the end date
+    virtual std::vector<Date> business_days( DateRange ) const;
+    virtual std::vector<Date> holidays( DateRange ) const = 0;
+
+    // Count of business days between two dates. This is inclusive of the first date and exclusive of the last
+    virtual unsigned int business_day_count( Date, Date ) const;
+
+    virtual std::string name( ) const = 0;
+};
+
+// Relational operators.
+REFLEX_CALENDAR_EXPORT bool operator==( Calendar const&, Calendar const& );
+REFLEX_CALENDAR_EXPORT bool operator!=( Calendar const&, Calendar const& );
+
+// Do not rely on there being any specific ordering only that there is some total ordering
+REFLEX_CALENDAR_EXPORT bool operator<( Calendar const&, Calendar const& );
+REFLEX_CALENDAR_EXPORT bool operator<=( Calendar const&, Calendar const& );
+REFLEX_CALENDAR_EXPORT bool operator>( Calendar const&, Calendar const& );
+REFLEX_CALENDAR_EXPORT bool operator>=( Calendar const&, Calendar const& );
+
+// Returns < 0 if first if less than second 0 if equal and > 0 if first is great than second
+//    This style of function is used in the .NET IComparable interface so it's easier to implement it here
+REFLEX_CALENDAR_EXPORT int compare( Calendar const&, Calendar const& );
+
+template <> inline std::string name_of_type<Calendar>( ) { return "Calendar"; }
+}
+
+
+--- CalendarCompositionFactory.l ---
+%{
+    // We don't use this type here but the tab.hpp declares it as extern
+    //     We need to include the tab.hpp header to get TOKEN identifier constants like TOKEN_STRING
+    #define YYSTYPE int
+
+    #include "CalendarCompositionFactory.tab.hpp"
+%}
+
+%option noyyget_in
+%option noyyset_in
+%option noyyget_out
+%option noyyset_out
+%option noyyget_lineno
+%option noyyset_lineno
+%option noyyget_extra
+%option noyyset_extra
+%option noyyget_debug
+%option noyyset_debug
+%option noyywrap
+%option noinput
+%option nounput
+
+%%
+
+[ \t]
+[|\+]              { return TOKEN_OR; }
+[&]                { return TOKEN_AND; }
+[\^]               { return TOKEN_XOR; }
+[!]                { return TOKEN_NOT; }
+[(]                { return TOKEN_OPEN; }
+[)]                { return TOKEN_CLOSE; }
+[^" \t|&!()^]*     { return TOKEN_STRING; }
+\"[^" \t|&!()^]*\" { return TOKEN_QUOTED_STRING; }
+
+%%
+
+#include <reflex_calendar_composition/FlexInputBuffer.h>
+
+#if defined(INCLUDE_STD_LIB)
+#include <iostream>
+#include <string_view>
+#endif
+
+using RiskEvolution::Reflex::FlexInputBuffer;
+
+using std::string_view;
+
+struct FlexInputBuffer::Implementation
+{
+    Implementation( Implementation const& ) = delete;
+    Implementation& operator=( const Implementation ) = delete;
+
+    Implementation( string_view input ) : buffer( yy_scan_bytes( input.data( ), static_cast<int>( input.size( ) ) ) )
+    {
+    }
+
+    virtual ~Implementation( )
+    {
+        if( buffer != 0 )
+        {
+            yy_delete_buffer( buffer );
+			yylex_destroy( );
+        }
+    }
+
+    YY_BUFFER_STATE buffer;
+};
+
+FlexInputBuffer::FlexInputBuffer( string_view input ) : m_implementation( new Implementation( input ) )
+{
+}
+
+FlexInputBuffer::~FlexInputBuffer( )
+{
+    delete m_implementation;
+}
+
+
+--- CalibrationDriver.cpp ---
+#include "CalibrationDriver.h"
+
+#include "Calibration.h"
+#include "Input.h"
+#include "Inputs.h"
+
+#include <reflex_environment_creation/CaptureIds.h>
+#include <reflex_environment_data/DataTemplate.h>
+#include <reflex_environment/Forward.h>
+#include <reflex_environment_id/Ids.h>
+#include <reflex_market/Create.h>
+#include <reflex_market/Market.h>
+#include <reflex_projection_curve_creation/FlatCurve.h>
+#include <reflex_discount_curve_creation/CreateFromFlatZero.h>
+#include <reflex_date/DateTime.h>
+#include <reflex_xml/serialization/Deserialize.h>
+#include <reflex_platform/Algorithm.h>
+
+using std::map;
+using std::optional;
+using std::shared_ptr;
+using std::string;
+using std::vector;
+
+namespace RiskEvolution::Reflex::CurveCalibration
+{
+namespace
+{
+struct Sensitivity
+{
+    explicit Sensitivity( CurveCalibration::Input const& i ) : input( i ) { }
+
+    CurveCalibration::Input input;
+
+    // The ids off all things we are sensitive to like discount curves
+    Environments::Ids ids;
+};
+
+struct DummyEnvironment : Environments::Forward
+{
+    explicit DummyEnvironment( shared_ptr<Environments::Environment const> environment ) : Forward( std::move( environment ) ) { }
+
+    shared_ptr<DiscountCurves::Curve const> discount_curve( Environments::DiscountCurveId const& ) const noexcept override { return m_discount_curve; }
+
+    shared_ptr<ProjectionCurves::Curve const> break_even_curve( Environments::BreakEvenCurveId const& ) const noexcept override { return m_projection_curve; }
+
+    optional<double> fx_rate( CurrencyPair const& ) const noexcept override { return 0.5; }
+
+    shared_ptr<DiscountCurves::Curve const>   m_discount_curve { DiscountCurves::make_from_flat_zero( 0.01 ) };
+    shared_ptr<ProjectionCurves::Curve const> m_projection_curve { ProjectionCurves::make_flat_curve( 0.01 ) };
+};
+
+struct CalibrationDriver
+{
+    CalibrationDriver( CurveCalibration::Inputs const& i ) : inputs( i ), environment( i.environment ), points_to_calibrate( ), sensitivities( )
+    {
+        Date today = inputs.environment->date_time( ).date( );
+
+        if( inputs.inputs.empty( ) == true )
+        {
+            throw std::runtime_error( "Calibration called with no instruments to calibrate" );
+        }
+
+        // Create an instrument for each instrument in the input
+        for( auto const& point: inputs.inputs )
+        {
+            CurveCalibration::Input input;
+
+            auto const& market { environment->market( ) };
+
+            input.instrument = CurveCalibration::create_zero_instrument( point.instrument_id( ), today, market );
+            input.rate       = point.value( );
+
+            points_to_calibrate[ point.instrument_id( ) ] = input;
+        }
+
+        // We need a base environment that can be used to capture what curves the input instruments are sensitive to.
+        //     The discount factors and break even rates returned by these curves don't matter as the valuation they
+        //     produce are thrown away anyway.
+        auto const dummy_environment = std::make_shared<DummyEnvironment>( environment );
+
+        // Curves that are already in the environment and are hence already calibrated
+        auto const& calibrated_discount_curve_ids   = environment->discount_curve_ids( );
+        auto const& calibrated_break_even_curve_ids = environment->break_even_curve_ids( );
+
+        // Find out what discount and projections curves each instrument is sensitive to
+        for( auto const& point_to_calibrate: points_to_calibrate )
+        {
+            auto const capture_environment = Environments::make_ids_capture( dummy_environment );
+
+            // Calculate the PV of the instrument which will give us its sensitivities as a side effect
+            point_to_calibrate.second.instrument->break_even( *capture_environment );
+
+            Sensitivity sensitivity( point_to_calibrate.second );
+
+            auto const ids = capture_environment->captured_ids( );
+
+            sensitivity.ids.m_discount_curve_ids   = ids.m_discount_curve_ids;
+            sensitivity.ids.m_break_even_curve_ids = ids.m_break_even_curve_ids;
+
+            // Remove curve that have already present and hence don't need to be calibrated
+            for( auto const& discount_curve_id: calibrated_discount_curve_ids ) sensitivity.ids.m_discount_curve_ids.erase( discount_curve_id );
+            for( auto const& break_even_curve_id: calibrated_break_even_curve_ids ) sensitivity.ids.m_break_even_curve_ids.erase( break_even_curve_id );
+
+            sensitivities.push_back( sensitivity );
+        }
+
+        // Add the discounting risk free index to paying currencies of each instrument
+        //    The risk free map be something like
+        //    GBP.SONIA.D.1 -> GBP
+        //    USD.FEDFUND.D.1 -> USD
+        //    If we find we have a sensitivity to the USD discount curve we add a sensitivity to the risk free projection instrument
+        //    as there really both the same thing. Note there doesn't have to be a risk free instrument
+        for( auto& sensitivity: sensitivities )
+        {
+            for( auto const& discount_curve: sensitivity.ids.m_discount_curve_ids )
+            {
+                auto const iter = std::find_if(
+                    begin( inputs.risk_free_break_even_curves ),
+                    end( inputs.risk_free_break_even_curves ),
+                    [ discount_curve ]( auto const& key_value )
+                    {
+                        return key_value.second == discount_curve;
+                    }
+                );
+
+                if( iter != end( inputs.risk_free_break_even_curves ) )
+                {
+                    sensitivity.ids.m_break_even_curve_ids.insert( iter->first );
+                }
+            }
+        }
+
+        // Do an initial check that we don't have any input instruments that are already calibrated
+        remove_instruments_with_no_outstanding_sensitivies( );
+    }
+
+    bool remove_instruments_with_no_outstanding_sensitivies( )
+    {
+        // Remove any instruments that have no sensitive's as all the discount curve and projection curves to which the instrument is
+        //     sensitive have now been calibrated
+        auto const iter = remove_if(
+            begin( sensitivities ),
+            end( sensitivities ),
+            [ & ]( Sensitivity& sensitivity ) -> bool
+            {
+                return sensitivity.ids.empty( );
+            }
+        );
+
+        // Did we manage to remove some
+        bool result = ( iter != end( sensitivities ) );
+
+        sensitivities.erase( iter, end( sensitivities ) );
+
+        return result;
+    }
+
+    map<Environments::BreakEvenCurveId, vector<CurveCalibration::Input>> get_single_rate_instruments( ) const
+    {
+        map<Environments::BreakEvenCurveId, vector<CurveCalibration::Input>> result;
+
+        for( auto const& sensitivity: sensitivities )
+        {
+            if( sensitivity.ids.m_discount_curve_ids.size( ) < 2 && sensitivity.ids.m_break_even_curve_ids.size( ) == 1 )
+            {
+                // The only remaining projection curve sensitivity curve of this instrument
+                Environments::BreakEvenCurveId key( *begin( sensitivity.ids.m_break_even_curve_ids ) );
+
+                // Number of discount curve sensitivities is either 1 or 0 at this point
+                if( sensitivity.ids.m_discount_curve_ids.size( ) == 1 )
+                {
+                    // If we have one discount curve then find out if this instrument is a risk free instrument
+                    auto const iter = inputs.risk_free_break_even_curves.find( key );
+
+                    if( iter != end( inputs.risk_free_break_even_curves ) )
+                    {
+                        result[ key ].push_back( sensitivity.input );
+                    }
+                }
+                else
+                {
+                    result[ key ].push_back( sensitivity.input );
+                }
+            }
+        }
+
+        return result;
+    }
+
+    shared_ptr<Environments::Environment const> calibrate( Interpolation::Type type )
+    {
+        do
+        {
+            // Find a set of instrument of a given type that all have one unsolved projection rate
+            auto const instruments_to_calibrate = get_single_rate_instruments( );
+
+            for( auto const& value: instruments_to_calibrate )
+            {
+                auto const& break_even_curve_id = value.first;
+
+                // Is this projection curve risk free
+                auto const iter = inputs.risk_free_break_even_curves.find( break_even_curve_id );
+
+                if( iter == end( inputs.risk_free_break_even_curves ) )
+                {
+                    // Calibrate just projection curves, assumes any discount curves needed are already in the environment
+                    environment = CurveCalibration::calibrate_deposit_projection_curve( environment, break_even_curve_id, value.second, type );
+
+                    // Remove the projection curve sensitivity from all instruments
+                    for( auto& sensitivity: sensitivities )
+                    {
+                        sensitivity.ids.m_break_even_curve_ids.erase( break_even_curve_id );
+                    }
+                }
+                else
+                {
+                    auto const& discount_curve_id = iter->second;
+
+                    // Calibrate projection curves and discount curve
+                    environment = CurveCalibration::calibrate_deposit_projection_curve( environment, break_even_curve_id, iter->second, value.second, type );
+
+                    // Remove the projection curve and discount curve sensitivities from all instruments
+                    for( auto& sensitivity: sensitivities )
+                    {
+                        sensitivity.ids.m_break_even_curve_ids.erase( break_even_curve_id );
+                        sensitivity.ids.m_discount_curve_ids.erase( discount_curve_id );
+                    }
+                }
+            }
+        }
+        while( remove_instruments_with_no_outstanding_sensitivies( ) == true );
+
+        if( sensitivities.empty( ) == false )
+        {
+            string error( "Failed to calibrate all instruments remaining instruments -" );
+
+            for( auto const& sensitivity: sensitivities )
+            {
+                error += " " + sensitivity.input.instrument->instrument_id( ).name( );
+            }
+
+            throw std::runtime_error( error );
+        }
+
+        return environment;
+    }
+
+    CurveCalibration::Inputs inputs;
+
+    shared_ptr<Environments::Environment const> environment;
+
+    map<InstrumentId, CurveCalibration::Input> points_to_calibrate;
+
+    vector<Sensitivity> sensitivities;
+};
+}
+
+shared_ptr<Environments::Environment const> calibrate( Inputs const& inputs ) { return calibrate( inputs, Interpolation::Type::LINEAR ); }
+
+shared_ptr<Environments::Environment const> calibrate( Inputs const& inputs, Interpolation::Type interpolation_type )
+{
+    reflex_assert_with_message( inputs.environment != nullptr, "Curve calibration called with a null environment in the inputs" )
+        reflex_assert_with_message( inputs.inputs.empty( ) == false, "Curve calibration called with no input points" )
+
+            CalibrationDriver driver( inputs );
+
+    return driver.calibrate( interpolation_type );
+}
+}
+
+--- CalibrationDriver.h ---
+#pragma once
+
+#include "reflex_curve_calibration_export.h"
+
+#include "ForwardDeclarations.h"
+
+#include <reflex_environment/ForwardDeclarations.h>
+#include <reflex_math_basic/InterpolationType.h>
+#include <reflex_platform/Platform.h>
+
+#if defined( INCLUDE_STD_LIB )
+    #include <memory>
+#endif
+
+namespace RiskEvolution::Reflex::CurveCalibration
+{
+REFLEX_CURVE_CALIBRATION_EXPORT std::shared_ptr<Environments::Environment const> calibrate( Inputs const& );
+REFLEX_CURVE_CALIBRATION_EXPORT std::shared_ptr<Environments::Environment const> calibrate( Inputs const&, Interpolation::Type );
+}
+
+
+--- CashflowGenerator.cpp ---
+#include "CashflowGenerator.h"
+
+
+--- ClosestMatches.txt ---
+Target: Calendar.h
+Copied: C:\Users\user\source\repos\ReflexLibs\Main\reflex_calendar\Calendar.h
+
+Target: CalendarCompositionFactory.cpp
+Copied: C:\Users\user\source\repos\ReflexLibs\Main\reflex_calendar_composition\CalendarCompositionFactory.l
+
+Target: AccrualConstructionCentralBank.cpp
+Copied: C:\Users\user\source\repos\ReflexLibs\Main\reflex_accrual_creation\AccrualConstructionCentralBank.cpp
+
+Target: AccrualConstructionTenorMonthly.h
+Copied: C:\Users\user\source\repos\ReflexLibs\Main\reflex_accrual_creation\AccrualConstructionTenorMonthly.h
+
+Target: LegCashflowGeneration.cpp
+Copied: C:\Users\user\source\repos\ReflexLibs\Main\reflex_instrument\CashflowGenerator.cpp
+
+Target: DiscountCurveBootstrap.cpp
+Copied: C:\Users\user\source\repos\ReflexLibs\Main\test\evaluation\environment\DiscountCurves.cpp
+
+Target: InflationCurveBuilder.cpp
+Copied: C:\Users\user\source\repos\ReflexLibs\Main\reflex_environment_id\InflationCurveId.cpp
+
+Target: InflationDiscountCurve.cpp
+Copied: C:\Users\user\source\repos\ReflexLibs\Main\reflex_instrument_curve\InflationSwapCurve.cpp
+
+Target: TradeInflationSwap.h
+Copied: C:\Users\user\source\repos\ReflexLibs\Main\reflex_instrument\InflationSwap.h
+
+Target: Instrument.cpp
+Copied: C:\Users\user\source\repos\ReflexLibs\Main\reflex_cashflow\Instrument.cpp
+
+Target: AnalyticHeston.cpp
+Copied: C:\Users\user\source\repos\ReflexLibs\Main\test\evaluation\environment\Analytics.cpp
+
+Target: AnalyticBatesNormalShifted.cpp
+Copied: C:\Users\user\source\repos\ReflexLibs\Main\reflex_analytic\BatesLognormalShifted.cpp
+
+Target: HestonModel.cpp
+Copied: C:\Users\user\source\repos\ReflexLibs\Main\reflex_analytic\HestonNormal.cpp
+
+Target: LevenbergMarquardtSolver.cpp
+Copied: C:\Users\user\source\repos\ReflexLibs\Main\reflex_cashflow_generation\LegGenerator.cpp
+
+Target: CurveCalibrationMatrixPV01.cpp
+Copied: C:\Users\user\source\repos\ReflexLibs\Main\reflex_curve_calibration\CalibrationDriver.cpp
+
+Target: MonteCarloEngine.cpp
+Copied: C:\Users\user\source\repos\ReflexLibs\Main\test\analytics\monte_carlo\MonteCarloTiming.cpp
+
+Target: GBRDeliverables.cpp
+Copied: C:\Users\user\source\repos\ReflexLibs\Main\reflex_addin_bond_future\GBRDeliverables.cpp
+
+Target: PricingService.cpp
+Copied: C:\Users\user\source\repos\ReflexLibs\Main\reflex_pricing_context\PricingContext.cpp
+
+Target: BinarySerialization.cpp
+Copied: C:\Users\user\source\repos\ReflexLibs\Main\reflex_environment\BinarySerialization.cpp
+
+Target: reflex_pricing.proto
+Copied: C:\Users\user\source\repos\ReflexLibs\Main\ReflexLibsFile.txt
+
+
+
+--- Concat.py ---
+
+
+--- CouponLegGenerator.cpp ---
+#include "CouponLegGenerator.h"
+
+#include <reflex_cashflow_generation_data/CouponLegData.h>
+
+#include <reflex_cashflow/Cashflows.h>
+#include <reflex_basis/AccrualPeriod.h>
+
+using std::optional;
+
+namespace RiskEvolution::Reflex::Cashflows::Generation
+{
+
+CouponLegGenerator::CouponLegGenerator( CouponLegData const& coupon_leg_data ) : NotionalLegGenerator( coupon_leg_data ), m_coupon_leg_data( coupon_leg_data ) { }
+
+void CouponLegGenerator::generate( ) { NotionalLegGenerator::generate( ); }
+
+Cashflow CouponLegGenerator::generate_accrued_cashflow( AccrualPeriod const& accrual_period, Observable const& observable )
+{
+    auto const accrual { Accrual( m_coupon_leg_data.m_basis, accrual_period ) };
+    auto const notional { generate_coupon_notional( accrual_period.start_date( ) ) };
+    auto const accrued_period { AccruedPeriod( accrual, notional, observable ) };
+
+    return generate_cashflow( accrual_period.start_date( ), accrual_period.end_date( ), accrued_period );
+}
+
+Notional CouponLegGenerator::generate_coupon_notional( Date date ) const { return Notional { generate_notional( date, 1.0 ) }; }
+}
+
+
+--- CouponLegGenerator.h ---
+#pragma once
+
+#include "NotionalLegGenerator.h"
+
+#include <reflex_cashflow/Observable.h>
+#include <reflex_basis/AccrualPeriod.h>
+#include <reflex_schedule/Schedule.h>
+
+namespace RiskEvolution::Reflex::Cashflows::Generation
+{
+struct CouponLegGenerator : NotionalLegGenerator
+{
+    CouponLegGenerator( CouponLegData const& );
+protected:
+    void generate( ) override;
+
+    Cashflow generate_accrued_cashflow( AccrualPeriod const&, Observable const& cashflow_observable );
+
+    virtual Notional generate_coupon_notional( Date ) const;
+
+    CouponLegData const& m_coupon_leg_data;
+};
+}
+
+
+--- DiscountCurves.cpp ---
+#include <test/Test.h>
+
+#include <test/utilities/environment_id/EnvironmentId.h>
+#include <test/utilities/discount_curve/Curves.h>
+#include <test/utilities/binary/BinaryRoundTrip.h>
+#include <test/utilities/xml/XMLRoundTrip.h>
+
+#include <reflex_environment_creation/Create.h>
+#include <reflex_environment/Environment.h>
+#include <reflex_environment_data/Data.h>
+#include <reflex_environment_id/DiscountCurveId.h>
+#include <reflex_market/Create.h>
+#include <reflex_discount_curve/Curve.h>
+#include <reflex_date/DateTime.h>
+#include <reflex_platform/AssertException.h>
+
+namespace RiskEvolution::Reflex::Tests
+{
+TEST_CASE( "discount_curve" )
+{
+    auto const today { 20140422_ymd };
+
+    Environments::Data data { .m_market { Markets::make_market( { .m_date_time { DateTime { today } } } ) } };
+
+    data.m_discount_curves[ test_discount_curve_id_1( ) ] = nullptr;
+
+    REQUIRE_THROWS_AS( Environments::make_environment( data ), Assert::Exception );
+}
+
+TEST_CASE( "discount_curve_empty" )
+{
+    auto const today { 20140422_ymd };
+
+    Environments::Data data { .m_market { Markets::make_market( { .m_date_time { DateTime { today } } } ) } };
+
+    auto const environment = Environments::make_environment( data );
+
+    REQUIRE_THROWS_AS( retrieve_discount_curve( *environment, test_discount_curve_id_1( ) ), std::runtime_error );
+
+    auto const discount_curve = environment->discount_curve( test_discount_curve_id_1( ) );
+
+    binary_round_trip( environment );
+    xml_round_trip( environment );
+}
+
+TEST_CASE( "discount_curves" )
+{
+    auto const today { 20140422_ymd };
+
+    Environments::Data data { .m_market { Markets::make_market( { .m_date_time { DateTime { today } } } ) } };
+
+    data.m_discount_curves[ test_discount_curve_id_1( ) ] = test_discount_curve_term_structure_1( );
+    data.m_discount_curves[ test_discount_curve_id_2( ) ] = test_discount_curve_term_structure_2( );
+
+    auto const environment { Environments::make_environment( data ) };
+
+    REQUIRE( retrieve_discount_curve( *environment, test_discount_curve_id_1( ) )->hash_code( ) == test_discount_curve_term_structure_1( )->hash_code( ) );
+    REQUIRE( retrieve_discount_curve( *environment, test_discount_curve_id_2( ) )->hash_code( ) == test_discount_curve_term_structure_2( )->hash_code( ) );
+
+    binary_round_trip( environment );
+    xml_round_trip( environment );
+}
+}
+
+
+--- GBRDeliverables.cpp ---
+#include "GBRDeliverables.h"
+
+#include "DeliverableUtils.h"
+
+#include <reflex_instrument/BondFuture.h>
+#include <reflex_instrument/FixedRateBond.h>
+#include <reflex_leg/Fixed.h>
+#include <reflex_leg_component/NotionalDetails.h>
+#include <reflex_tenor/Tenor.h>
+#include <reflex_date/Date.h>
+#include <reflex_platform/Assert.h>
+
+namespace RiskEvolution::Reflex::BondFutureAddin
+{
+
+bool GBR2YDeliverableRule( Instruments::BondFuture const& bond_future, Instruments::FixedRateBond const& fixed_rate_bond )
+{
+    bool result = check_bond_basics( bond_future, fixed_rate_bond );
+
+    if( result == true )
+    {
+        // 1 year 3 months and 3 years and 3 months
+        result = matches_month_maturity_range( bond_future.first_of_month_date_in_contract_month( ), fixed_rate_bond.maturity_date( ), 1 * 12 + 3, 3 * 12 + 3 );
+    }
+
+    if( result == true )
+    {
+        // Less than 6%
+        result = ( fixed_rate_bond.fixed_leg( )->fixed_rate( ) < 0.06 );
+    }
+
+    return result;
+}
+
+bool GBR5YDeliverableRule( Instruments::BondFuture const& bond_future, Instruments::FixedRateBond const& fixed_rate_bond )
+{
+    bool result = check_bond_basics( bond_future, fixed_rate_bond );
+
+    if( result == true )
+    {
+        // 4 years 6 months and 6 years and 3 months
+        result = matches_month_maturity_range( bond_future.first_of_month_date_in_contract_month( ), fixed_rate_bond.maturity_date( ), 4 * 12 + 6, 6 * 12 + 3 );
+    }
+
+    if( result == true )
+    {
+        // Between 1% and 7% fixed rate
+        result = ( fixed_rate_bond.fixed_leg( )->fixed_rate( ) > 0.01 && fixed_rate_bond.fixed_leg( )->fixed_rate( ) < 0.07 );
+    }
+
+    return result;
+}
+
+bool GBR10YDeliverableRule( Instruments::BondFuture const& bond_future, Instruments::FixedRateBond const& fixed_rate_bond )
+{
+    bool result = check_bond_basics( bond_future, fixed_rate_bond );
+
+    if( result == true )
+    {
+        // 8 years and 9 months to 13 years
+        result = matches_month_maturity_range( bond_future.first_of_month_date_in_contract_month( ), fixed_rate_bond.maturity_date( ), 8 * 12 + 9, 13 * 12 );
+    }
+
+    if( result == true )
+    {
+        // Between 1% and 7% fixed rate
+        result = ( fixed_rate_bond.fixed_leg( )->fixed_rate( ) > 0.01 && fixed_rate_bond.fixed_leg( )->fixed_rate( ) < 0.07 );
+    }
+
+    return result;
+}
+
+bool GBR30YDeliverableRule( Instruments::BondFuture const& bond_future, Instruments::FixedRateBond const& fixed_rate_bond )
+{
+    bool result = check_bond_basics( bond_future, fixed_rate_bond );
+
+    if( result == true )
+    {
+        // 28 to 37 years
+        result = matches_month_maturity_range( bond_future.first_of_month_date_in_contract_month( ), fixed_rate_bond.maturity_date( ), 28 * 12, 37 * 12 );
+    }
+
+    if( result == true )
+    {
+        // Between 1% and 7% fixed rate
+        result = ( fixed_rate_bond.fixed_leg( )->fixed_rate( ) > 0.01 && fixed_rate_bond.fixed_leg( )->fixed_rate( ) < 0.07 );
+    }
+
+    return result;
+}
+
+}
+
+
+--- heston.r ---
+# heston model parameters are
+#
+# dSt=mu*St*dt + sqrt(Vt)*St*dWS
+# dVt=kappa*(theta-Vt)*dt + omega*sqrt(Vt)*dWV
+
+# for the normal asset process variant that we added, we have
+#
+# dSt=mu*dt + sqrt(Vt)*dWS
+# dVt=kappa*(theta-Vt)*dt + omega*sqrt(Vt)*dWV
+#
+# and the initial value of the variance is v0; and dWS*dWV=rho*dt
+# we want 2*kappa*theta-omega^2 >0
+
+
+source("c:/Users/majed/code/r/nelderMead.r")
+
+
+# small imaginary part to move away from poles
+hes.smallImag<-0.0001
+
+# preliminary gaussian quadrature related set-up
+hes.gaussQNumNodes<-1024
+require(statmod)
+
+hes.gaussQ<-gauss.quad(hes.gaussQNumNodes,kind="legendre")
+# the integral we want to evaluate has 0 and Inf bounds; to use gauss-legendre we do a change of variables so the new variable is between -1 and 1
+hes.lnGaussQLegTrans<-function(x){
+	return((1+x)/(1-x))
+}
+
+# the derivative of the change of variable function
+hes.lnGaussQLegTransDeriv<-function(x){
+	return(2/(1-x)^2)
+}
+
+# in the normal model, our integral has -Inf and Inf bounds so we use the following transformation instead
+hes.nGaussQLegTrans<-function(x){
+	return(x/(1-x^2))
+}
+
+# the derivative of the change of variable function in the normal model case
+hes.nGaussQLegTransDeriv<-function(x){
+	return((1+x^2)/(1-x^2)^2)
+}
+
+# nodes and weights to be used in the lognormal case
+hes.lnNodes<-hes.lnGaussQLegTrans(hes.gaussQ$nodes)
+hes.lnWeights<-hes.gaussQ$weights*hes.lnGaussQLegTransDeriv(hes.gaussQ$nodes)
+# nodes and weights to be used in the normal case; we displace the real axis a little into the complex plane to get an integral that converges; otherwise we would be dividing by zero in the integrand
+hes.nNodes<-hes.lnGaussQLegTrans(hes.gaussQ$nodes)#####################+hes.smallImag*complex(real=0,imaginary=1)
+hes.nWeights<-hes.gaussQ$weights#######*hes.nGaussQLegTransDeriv(hes.gaussQ$Nodes)
+
+# the next two functions implement Heston's semi-analytic formulas.
+# arguments to hes.phi(): x is a vector, the rest are scalars;
+# returns a vector with the values of phi at the components of x 
+hes.phi<-function(x,fwd,tau,kappa,theta,omega,V0,rho,normal){
+	# i^2=-1
+	i<-complex(real=0,imaginary=1)
+
+	# rename (legacy stuff)
+	u<-x
+
+	phi<-NULL
+	if(length(u)!=0){
+		rouimk<-kappa-rho*omega*u*i
+		# d has different values depending on whether we're using the normal or the lognormal model
+		if(normal){ 
+			d<-sqrt(rouimk^2+omega^2*u^2)
+		}else{
+			d<-sqrt(rouimk^2+omega^2*(u*i+u^2))
+		}
+		
+		ig<-(rouimk-d)/(rouimk+d)
+
+		# the argument of the log expression in Heston's formula
+		lnArg<-(ig*exp(-d*tau)-1)/(ig-1)
+		# the principal branch of the complex log
+		ln<-log(Mod(lnArg))+i*Arg(lnArg)
+		D<-(rouimk-d)/omega^2*((1-exp(-d*tau))/(1-ig*exp(-d*tau)))
+		C<-kappa*theta/omega^2*((rouimk-d)*tau-2*ln)
+		# here again: distinguish between normal and lognormal models
+		if(normal){
+			phi<-exp(C+D*V0+i*u*fwd)
+		}else{
+			phi<-exp(C+D*V0+i*u*log(fwd))
+		}
+	}
+
+	return(phi)
+}
+
+# this is the full integrand as it appears in Heston's option pricing formula
+# x is a vector; optData is a data frame of options with columns the strings that you find in the body of the function; modelParamList specifies the model parameters (kappa, theta, omega, rho, v0)
+# returns a vector 
+hes.integrate<-function(x,weights,optData,modelParamList,normal){
+	if(any(x==0)){
+		stop("error in hes.integrand(): cannot be evaluated at 0")
+	}
+	
+	# rename to u (legacy stuff; not necessary)
+	u<-x
+
+	# get the options characteristics
+	fwd<-optData[["fwd"]]
+	strike<-optData[["strike"]]
+	tau<-optData[["tau"]]
+	# get the model parameters
+	kappa<-modelParamList[["kappa"]]
+	theta<-modelParamList[["theta"]]
+	omega<-modelParamList[["omega"]]
+	rho<-modelParamList[["rho"]]
+	V0<-modelParamList[["v0"]]
+
+	# initialize return vector
+	ret<-rep(NA,nrow(optData))
+	# get the f1, f2, values at u
+	# i is the imaginary number, i^2=-1
+	i<-complex(real=0,imaginary=1)
+	taus<-unique(tau)
+	for(t in 1:length(taus)){
+		temp<-tau==taus[t]
+		f<-match(TRUE,temp)
+		strikes<-strike[temp]
+		if(normal){
+			ptilde<-hes.phi(-(hes.lnGaussQLegTrans(u)+hes.smallImag*i),fwd[f],taus[t],kappa,theta,omega,V0,rho,TRUE)
+			for(s in 1:length(strikes)){
+				intg<--exp(i*(hes.smallImag*i+hes.lnGaussQLegTrans(u))*strikes[s])*ptilde/(hes.smallImag*i+hes.lnGaussQLegTrans(u))^2
+
+				# apply gauss-quadrature formula here
+				ret[temp][s]<-sum(weights*Re(intg)*hes.lnGaussQLegTransDeriv(u)/(pi))
+			}
+		}else{
+			phi1<-hes.phi(u-i,fwd[f],taus[t],kappa,theta,omega,V0,rho,FALSE)
+			phi2<-hes.phi(u,fwd[f],taus[t],kappa,theta,omega,V0,rho,FALSE)
+			for(s in 1:length(strikes)){
+				f1<-Re(exp(-i*u*log(strikes[s]))*phi1/(i*u*fwd[f]))
+				f2<-Re(exp(-i*u*log(strikes[s]))*phi2/(i*u))
+				# apply gauss-quadrature formula here
+				ret[temp][s]<-0.5*(fwd[f]-strikes[s])+1/pi*(fwd[f]*sum(weights*f1)-strikes[s]*sum(weights*f2))
+			}
+		}
+	}		
+
+	return(ret)
+}
+
+# get option prices
+hes.optionPrice<-function(df,optData,modelParamList){
+	if(length(df)!=nrow(optData)){
+		print("error in hes.optionPrice(): mismatch")
+		return(NULL)
+	}
+	
+	if(is.finite(match("model",names(modelParamList))) && modelParamList[["model"]]=="normal"){
+		fv<-hes.integrate(hes.gaussQ$nodes,hes.gaussQ$weights,optData,modelParamList,TRUE)
+	}else{
+		fv<-hes.integrate(hes.lnNodes,hes.lnWeights,optData,modelParamList,FALSE)
+	}
+	
+	temp<-is.finite(fv)
+	notNA<-rep(TRUE,nrow(optData))
+	if(any(!temp)){
+		notNA[!temp]<-FALSE
+	}
+	
+	# which options are call options?
+	type<-optData[["type"]]
+	callIndices<-type=="C"
+	
+	# initialize return vector
+	ret<-rep(NA,nrow(optData))
+	#get call options prices
+	# get call options prices
+	ret[callIndices&notNA]<-df[callIndices&notNA]*fv[callIndices&notNA]
+	#use put-call parity to get put options prices
+	ret[!callIndices&notNA]<-df[!callIndices&notNA]*(fv[!callIndices&notNA]-optData$fwd[!callIndices&notNA]+ optData$strike[!callIndices&notNA])
+
+	return(ret)
+}
+
+# auxiliary function needed for calibrating the model; returns a vector of residuals, the differences between model prices with parameters pars and market prices of options
+# pars is a vector of parameters; options is a data frame; dfs is a vector of discount factors of length equal to the number of options; pars is a set of parameters for the Heston model
+# returns a vector of residuals between market and model prices
+hes.resids<-function(pars,dfs,options,normal){
+	# retrieve the market prices of the options
+	mktPrice<-options[["mktPrice"]]
+
+	# set the parameters for the Heston pricing function; the first parameter we passed to the optimizer is 2*kappa*theta-omega^2, NOT kappa; retrieve kappa from the first parameter here; the acrobatics were meant to avoid specifying a non-linear constraint that constrOptim() wouldn't be able to handle
+	modelParamList<-list(kappa=pars[1],theta=pars[2],omega=pars[3],rho=pars[4],v0=pars[5],model=ifelse(normal,"normal","lognormal"))
+	
+	# get the Heston prices of options for parameters pars
+	hesPrice<-hes.optionPrice(dfs,options,modelParamList)
+	# now, which of the prices is not NA?
+	notNA<-is.finite(hesPrice)
+	
+	# for certain sets of parameters, model prices will blow up and for some of the options will be NA; if pars is such a set, we return large residuals, and this forces minimizer to reject pars and guess again
+	if(sum(as.numeric(notNA))!=length(mktPrice)){
+		# we're here, therefore some of the model prices is NA, therefore we set the residuals to some very large values
+		return(rep(hes.bigResidual,length(mktPrice)))
+	}else{
+		return(mktPrice-hesPrice)
+	}
+}
+
+# takes a vector and returns a scalar; this is meant to regularize the parameters
+hes.parPenalty<-function(pars){
+	# return the euclidean distance between the current guess for model parameters and reference parameters; here we take the initial guess of the parameters
+	return(sqrt(sum((pars-hes.optimParams0)^2)))
+}
+
+# this uses constrOptim from the basic R package to minimize the objective function; the algorithm is Nelder-Meade
+hes.optim<-function(dfs,options,normal){
+	
+	# kappa=pars[1],theta=pars[2],omega=pars[3],rho=pars[4],v0=pars[5]
+	hes.setParams<-function(pars,normal){
+		ret<-hes.optimParams0
+		ret[hes.useParams]<-pars
+		if(normal){
+			if(hes.useParams[2]) ret[2]<-ret[2]*hes.fwd^2
+			if(hes.useParams[5]) ret[5]<-ret[5]*hes.fwd^2
+			if(hes.useParams[3]) ret[3]<-ret[3]*hes.fwd
+		}
+		return(ret)
+	}
+	
+	# the objective function we pass to the minimizer when calibrating; this is just the euclidean distance between model prices (given parameters pars) and market prices of options
+	hes.optimObjective<-function(pars){
+		temp<-hes.setParams(pars,normal)
+		resids<-hes.resids(temp,dfs,options,normal)
+		ret<-sqrt(1/nrow(options)*sum(resids*resids))
+		if(hes.penaltyCoeff!=0){
+			ret<-ret+hes.penaltyCoeff*hes.parPenalty(temp)
+		}
+		return(ret)
+	}
+
+	hes.constraint<-function(pars){
+		temp<-hes.setParams(pars,FALSE)
+		return(c(2*temp[1]*temp[2]-temp[3]^2,hes.ui%*%pars-hes.ci))
+	}
+	
+	#############################results<-constrOptim(hes.optimParams0[hes.useParams],hes.optimObjective,NULL,ui=hes.ui,ci=hes.ci)
+	results<-nm.constrNelderMead(hes.optimParams0[hes.useParams],hes.optimObjective,hes.constraint)
+	pars<-hes.setParams(results[["par"]],normal)
+	ret<-data.frame(kappa=pars[1],theta=pars[2],omega=pars[3],rho=pars[4],v0=pars[5],model=ifelse(normal,"normal","lognormal"),convergence=results[["convergence"]],error=results[["value"]])
+
+	return(ret)
+}
+
+hes.initParamSettings<-function(calibSettings){
+	#initial parameters for model calibration: the parameters we pass to the minimizer in the calibration process are (2*kappa*theta-omega^2),theta,omega,rho,v0)
+	hes.useParams<<-c(as.logical(calibSettings[["hes.useKappa"]]),as.logical(calibSettings[["hes.useTheta"]]),as.logical(calibSettings[["hes.useOmega"]]),as.logical(calibSettings[["hes.useRho"]]),as.logical(calibSettings[["hes.useV0"]]))
+
+	hes.optimParams0<<-c(as.numeric(calibSettings[["hes.kappa0"]]),as.numeric(calibSettings[["hes.theta0"]]),as.numeric(calibSettings[["hes.omega0"]]),as.numeric(calibSettings[["hes.rho0"]]),as.numeric(calibSettings[["hes.v0"]]))
+	
+	# constraint matrix and bounds passed to minimizer in calibration process: the constraints are: hes.ui %*% params - hes.ci > 0, where params are the model parameters we're looking for and %*% denotes matrix multiplication
+	constrMat<-NULL
+	numParams<-sum(as.numeric(hes.useParams))
+	for(i in 1:numParams){
+		constrMat<-rbind(constrMat,as.numeric((1:numParams)==i),-as.numeric((1:numParams)==i),deparse.level=0)
+	}
+	
+	hes.ui<<-constrMat
+	
+	# upper and lower bounds: 2 bounds for each of the 5 parameters; lower bound followed by -upper bound (yes, negative upper bound) for each; NOTE: what we call bounds on kappa are in fact bounds on 2*kappa*theta-omega^2
+	
+	paramBounds<-c(as.numeric(calibSettings[["hes.kappa.lb"]]),-as.numeric(calibSettings[["hes.kappa.ub"]]),as.numeric(calibSettings[["hes.theta.lb"]]),-as.numeric(calibSettings[["hes.theta.ub"]]),as.numeric(calibSettings[["hes.omega.lb"]]),-as.numeric(calibSettings[["hes.omega.ub"]]),as.numeric(calibSettings[["hes.rho.lb"]]),-as.numeric(calibSettings[["hes.rho.ub"]]),as.numeric(calibSettings[["hes.v0.lb"]]),-as.numeric(calibSettings[["hes.v0.ub"]])) 
+	repUseParams<-rep(hes.useParams,each=2)
+	
+	hes.ci <<- paramBounds[repUseParams]
+}
+
+# this is the main function for calibration of the model; options is a data.frame with the options we're calibrating to; dfs, is a vector of discount factors
+# returns a list with two components, "params", a data frame with all model parameters that we calculated and "prices", the model values of the options using the optimal parameters
+# Note: cannot be called from RExcel as it returns a list that is not a data.frame
+hes.calibrate<-function(dfs,options,calibSettings){
+	# do we calibrate to all smiles simultaneously or each individually?
+	hes.allSmiles<-as.logical(calibSettings[["hes.allSmiles"]])
+	
+	#model calibration related settings; make them global for convenience
+	# big number to use to force minimizer to guess again when needed
+	hes.bigResidual<<-10000.0
+
+	# relative tolerance
+	hes.optimControl<<-list(reltol=as.numeric(calibSettings[["hes.reltol"]]))
+
+	# which minimization algorithm to use
+	hes.optimMethod<<-"Nelder-Mead" #c("Nelder-Mead","BFGS","CG","L-BFGS-B","SANN") ; only "Nelder-Mead" allows NULL gradient from constrOptim()
+	#which model do we calibrate?
+	hes.model<-calibSettings[["hes.model"]]
+	normal<-ifelse(hes.model=="normal",TRUE,FALSE)
+	
+	hes.penaltyCoeff<<-as.numeric(calibSettings[["hes.penaltyCoeff"]])
+	hes.initParamSettings(calibSettings)
+	
+	# get the maturities of the options; each determines a smile/skew
+	mats<-unique(options$tau)
+	# calibrate to all smiles (all maturities, i.e.) or one by one, which implies time dependent parameters in the model?
+	if(!hes.allSmiles){
+		params<-NULL
+		prices<-NULL
+		# if calibrating the normal model we do 2 passes; first to calibrate the lognormal model, and the second pass uses lognormal parameters as initial guesses for the normal model
+		for(m in 1:(1+as.numeric(normal))){
+			saveParams<-params
+			for(i in 1:length(mats)){
+				if(m==2){
+					# we get here only if we're calibrating the normal model
+					hes.optimParams0<<-as.numeric(saveParams[saveParams$tau==mats[i],][,is.element(names(saveParams),c("kappa","theta","omega","rho","v0"))])
+					normal<-TRUE
+					# scale the lognormal model parameters by this factor to get the normal model parameters; using the spot is more convenient
+					hes.fwd<<- options[smileIndices,]$spot[1] ##############options[smileIndices,]$fwd[1]
+
+					# if we're just starting with the normal model reset the params
+					if(i==1){
+						params<-NULL
+						prices<-NULL
+					}
+				}else{
+					# in a first pass, i.e., m=1, model is always lognormal
+					normal<-FALSE
+				}
+				
+				# extract those options with this maturity
+				smileIndices<-options$tau==mats[i]
+				smileOptions<-options[smileIndices,]
+				smileDfs<-dfs[smileIndices]
+
+				# get the params that minimize the distance between mkt and model prices and bind them to the output data.frame
+				params<-rbind(params,data.frame(tau=mats[i],hes.optim(smileDfs,smileOptions,normal)))
+				#get model prices for the options using the optimal params
+				hes.price<-hes.optionPrice(smileDfs,smileOptions,as.list(params[nrow(params),]))
+				prices<-rbind(prices,data.frame(smileOptions,hes.price))
+			}
+		}
+	}else if(hes.allSmiles){
+		# NOTE: if calibrating to all smiles simultaneously we use the spot price to scale the Heston lognormal parameters
+		hes.fwd<<- options[smileIndices,]$spot[1]
+
+		# we're here only if we want to calibrate the model to the entire options grid with only one set of parameters
+		pars<-hes.optim(dfs,options,normal)
+		hes.price<-hes.optionPrice(dfs,options,as.list(pars))
+		# this will automatically replicate pars on as many rows as length(mats)
+		params<-data.frame(tau=mats,pars)
+		prices<-data.frame(options,hes.price)
+	}
+
+	#output has 2 components that we put in a list
+	ret<-list(params=params,prices=prices)
+	return(ret)
+}
+
+modelParamList<-list(kappa=2.,theta=0.09,omega=1.0,rho=-0.3,v0=0.09,model="lognormal")
+opt<-data.frame(fwd=101.,tau=5.,type="C",strike=99.)
+print(hes.optionPrice(1.,opt,modelParamList))
+fn<-function(v0){
+	modelParamList[["v0"]]<-v0
+	ret<-c()
+	for(i in 1:length(v0)){
+		modelParamList[["v0"]]<-v0[i]
+		ret<-c(ret,hes.optionPrice(1.,opt,modelParamList))
+	}
+		
+	return(ret)
+}
+
+curve(fn,from=0.0001,to=1000000.)
+
+--- HestonInterface.cpp ---
+#include "HestonInterface.h"
+
+
+--- HestonNormal.cpp ---
+#include "HestonNormal.h"
+
+#include "HestonRaw.h"
+#include "Price.h"
+
+#include <reflex_analytic_calibration/Heston.h>
+#include <reflex_analytic_raw/HestonNormal.h>
+#include <reflex_option/OptionIntrinsicPrice.h>
+#include <reflex_utility/InputValidityCheckResult.h>
+
+namespace RiskEvolution::Reflex::Analytics::Heston::Normal
+{
+// Price
+
+Price price_of_call( Calibration const& calibration, ForwardStrikeTimeToExpiry const& forward_strike_time_to_expiry )
+{
+    return Price( invoke_raw_price_function( call_heston_raw_function, AnalyticsRaw::Heston::Normal::price_of_call<double>, calibration, forward_strike_time_to_expiry ) );
+}
+
+Price price_of_put( Calibration const& calibration, ForwardStrikeTimeToExpiry const& forward_strike_time_to_expiry )
+{
+    return invoke_raw_price_function( call_heston_raw_function, AnalyticsRaw::Heston::Normal::price_of_put<double>, calibration, forward_strike_time_to_expiry );
+}
+
+Price price( Calibration const& calibration, ForwardStrikeTimeToExpiry const& forward_strike_time_to_expiry, CallOrPut call_or_put )
+{
+    return invoke_call_or_put_function( price_of_call, price_of_put, calibration, forward_strike_time_to_expiry, call_or_put );
+}
+
+// Delta
+
+Delta delta_of_call( Calibration const& calibration, ForwardStrikeTimeToExpiry const& forward_strike_time_to_expiry )
+{
+    return Delta { call_heston_raw_function( calibration, forward_strike_time_to_expiry, AnalyticsRaw::Heston::Normal::delta_of_call<double> ) };
+}
+
+Delta delta_of_put( Calibration const& calibration, ForwardStrikeTimeToExpiry const& forward_strike_time_to_expiry )
+{
+    return Delta { call_heston_raw_function( calibration, forward_strike_time_to_expiry, AnalyticsRaw::Heston::Normal::delta_of_put<double> ) };
+}
+
+Delta delta( Calibration const& calibration, ForwardStrikeTimeToExpiry const& forward_strike_time_to_expiry, CallOrPut call_or_put )
+{
+    return invoke_call_or_put_function( delta_of_call, delta_of_put, calibration, forward_strike_time_to_expiry, call_or_put );
+}
+
+Gamma gamma( Calibration const& calibration, ForwardStrikeTimeToExpiry const& forward_strike_time_to_expiry )
+{
+    return Gamma { call_heston_raw_function( calibration, forward_strike_time_to_expiry, AnalyticsRaw::Heston::Normal::gamma<double> ) };
+}
+
+Reflex::Theta theta_forward( Calibration const& calibration, ForwardStrikeTimeToExpiry const& forward_strike_time_to_expiry )
+{
+    return Reflex::Theta { call_heston_raw_function( calibration, forward_strike_time_to_expiry, AnalyticsRaw::Heston::Normal::theta_forward<double> ) };
+}
+
+// Validity checks
+
+InputValidityCheckResult check_validity( Calibration const&, ForwardStrikeTimeToExpiry const&, CallOrPut ) { return { }; }
+}
+
+
+--- HestonNormal.h ---
+#pragma once
+
+#include "reflex_analytic_export.h"
+
+#include "ForwardDeclarations.h"
+
+#include <reflex_analytic_calibration/ForwardDeclarations.h>
+#include <reflex_option/ForwardDeclarations.h>
+#include <reflex_option/CallOrPut.h>
+#include <reflex_option/Delta.h>
+#include <reflex_option/Gamma.h>
+#include <reflex_option/Price.h>
+#include <reflex_option/Theta.h>
+#include <reflex_utility/ForwardDeclarations.h>
+
+namespace RiskEvolution::Reflex::Analytics::Heston::Normal
+{
+REFLEX_ANALYTIC_EXPORT Reflex::Price price_of_call( Calibration const&, ForwardStrikeTimeToExpiry const& );
+REFLEX_ANALYTIC_EXPORT Reflex::Price price_of_put( Calibration const&, ForwardStrikeTimeToExpiry const& );
+REFLEX_ANALYTIC_EXPORT Reflex::Price price( Calibration const&, ForwardStrikeTimeToExpiry const&, CallOrPut );
+REFLEX_ANALYTIC_EXPORT Reflex::Delta delta_of_call( Calibration const&, ForwardStrikeTimeToExpiry const& );
+REFLEX_ANALYTIC_EXPORT Reflex::Delta delta_of_put( Calibration const&, ForwardStrikeTimeToExpiry const& );
+REFLEX_ANALYTIC_EXPORT Reflex::Delta delta( Calibration const&, ForwardStrikeTimeToExpiry const&, CallOrPut );
+REFLEX_ANALYTIC_EXPORT Reflex::Gamma gamma( Calibration const&, ForwardStrikeTimeToExpiry const& );
+REFLEX_ANALYTIC_EXPORT Reflex::Theta theta_forward( Calibration const&, ForwardStrikeTimeToExpiry const& );
+
+REFLEX_ANALYTIC_EXPORT InputValidityCheckResult check_validity( Calibration const&, ForwardStrikeTimeToExpiry const&, CallOrPut );
+}
+
+
+--- InflationCurveId.cpp ---
+#include "InflationCurveId.h"
+
+#include <reflex_component_factory/InflationIndex.h>
+#include <reflex_component_factory/InflationIndexId.h>
+#include <reflex_xml/serialization/Deserialize.h>
+#include <reflex_xml/serialization/Serialize.h>
+#include <reflex_binary/Hash.h>
+#include <reflex_platform/Assert.h>
+
+using std::string;
+using std::string_view;
+
+namespace RiskEvolution::Reflex::Environments
+{
+InflationCurveId::InflationCurveId( InflationIndex const& inflation_index, string_view name ) : m_inflation_index( &inflation_index ), m_name( name )
+{
+    m_hash_code = hash( m_hash_code, *m_inflation_index, m_name );
+}
+
+InflationIndex const& InflationCurveId::inflation_index( ) const
+{
+    reflex_assert_with_message( m_inflation_index != nullptr, "Attempt to use a default constructed inflation index id" )
+
+        return *m_inflation_index;
+}
+
+string const& InflationCurveId::name( ) const
+{
+    reflex_assert_with_message( m_inflation_index != nullptr, "Attempt to use a default constructed inflation index id" )
+
+        return m_name;
+}
+
+HashCode InflationCurveId::hash_code( ) const { return m_hash_code; }
+
+bool operator==( InflationCurveId const& lhs, InflationCurveId const& rhs ) { return lhs.hash_code( ) == rhs.hash_code( ); }
+
+bool operator!=( InflationCurveId const& lhs, InflationCurveId const& rhs ) { return !( lhs == rhs ); }
+
+bool operator<( InflationCurveId const& lhs, InflationCurveId const& rhs ) { return lhs.hash_code( ) < rhs.hash_code( ); }
+
+bool operator<=( InflationCurveId const& lhs, InflationCurveId const& rhs ) { return !( rhs < lhs ); }
+
+bool operator>( InflationCurveId const& lhs, InflationCurveId const& rhs ) { return rhs < lhs; }
+
+bool operator>=( InflationCurveId const& lhs, InflationCurveId const& rhs ) { return !( lhs < rhs ); }
+
+int compare( InflationCurveId const& lhs, InflationCurveId const& rhs )
+{
+    if( lhs < rhs ) return -1;
+    if( rhs < lhs ) return 1;
+
+    return 0;
+}
+
+string to_string( InflationCurveId const& inflation_curve_id, char separator )
+{
+    return to_string( inflation_curve_id.inflation_index( ) ) + separator + inflation_curve_id.name( );
+}
+
+HashCode hash( InflationCurveId const& curve_id ) { return curve_id.hash_code( ); }
+
+void dom_serialize( DOMElement dom_element, InflationCurveId const& inflation_curve_id, string_view element_name )
+{
+    dom_serialize( append_child( dom_element, element_name ), inflation_curve_id.inflation_index( ), make_sob( "Name", inflation_curve_id.name( ) ) );
+}
+
+void byte_append( ByteAppender& byte_appender, InflationCurveId const& curve_id ) { byte_append( byte_appender, curve_id.inflation_index( ), curve_id.name( ) ); }
+
+}
+
+namespace RiskEvolution::Reflex
+{
+
+template <> Environments::InflationCurveId dom_deserialize<Environments::InflationCurveId>( DOMElement dom_element )
+{
+    auto const& index { dom_deserialize<InflationIndex const&>( dom_element ) };
+    auto const  name { dom_deserialize<string>( "Name", dom_element ) };
+
+    return Environments::InflationCurveId { index, name };
+}
+
+template <> Environments::InflationCurveId deserialize<Environments::InflationCurveId>( ByteReader& byte_reader )
+{
+    auto const& index { deserialize<InflationIndex const&>( byte_reader ) };
+    auto const  name { deserialize<string>( byte_reader ) };
+
+    return Environments::InflationCurveId { index, name };
+}
+
+}
+
+
+--- InflationSwap.h ---
+#pragma once
+
+#include "Swap.h"
+
+#include <reflex_leg/ForwardDeclarations.h>
+#include <reflex_cashflow/Leg.h>
+#include <reflex_platform/NameOfType.h>
+
+namespace RiskEvolution::Reflex
+{
+namespace Instruments
+{
+struct REFLEX_INSTRUMENT_EXPORT InflationSwap : Swap
+{
+    // A normal non-inflation linked fixed leg, this may be compounded which means it only pays one coupon
+    virtual std::shared_ptr<Legs::Fixed> fixed_leg( ) const = 0;
+
+    // This will only pay the inflation uplift on the notional
+    virtual std::shared_ptr<Legs::InflationLinkedZeroCoupon> inflation_linked_zero_coupon_leg( ) const = 0;
+
+    using CashflowType      = std::array<Cashflows::Leg, 2>;
+    using CashflowGenerator = std::function<CashflowType( InflationSwap const&, Date )>;
+
+    virtual CashflowGenerator const& cashflow_generator( ) const = 0;
+};
+}
+template <> inline std::string name_of_type<Instruments::InflationSwap>( ) { return "Instruments::InflationSwap"; }
+}
+
+--- InflationSwapCurve.cpp ---
+#include "InflationSwapCurve.h"
+
+#include <reflex_instrument_observed_valuation/InflationSwap.h>
+#include <reflex_instrument_observed_creation/InflationSwap.h>
+#include <reflex_projection_curve/Curve.h>
+#include <reflex_date/DateArithmetic.h>
+
+using std::shared_ptr;
+
+namespace RiskEvolution::Reflex
+{
+shared_ptr<ProjectionCurves::Curve const> make_break_even_curve( Instruments::InflationSwap const& swap, shared_ptr<PricingContext const> const& pricing_context )
+{
+    struct LocalCurve : UniqueClassIdentiferImplementation<ProjectionCurves::Curve, 0x1f2a30d4>
+    {
+        LocalCurve( Instruments::InflationSwap const& inflation_swap, shared_ptr<PricingContext const> const& pricing_context ) :
+            m_inflation_swap( inflation_swap ),
+            m_pricing_context( pricing_context ),
+            m_today( pricing_context->date( ) )
+        {
+        }
+
+        double projected_rate( DaysOffset offset ) const override
+        {
+            auto const& swap = make_and_cache_inflation_swap_observation( m_inflation_swap, add_days( m_today, offset ) );
+
+            return break_even( swap, *m_pricing_context );
+        }
+
+        void dom_serialize( DOMElement ) const override { reflex_assert_message( "InflationSwapCurve XML serialization TBD" ) }
+
+        void appender( ByteAppender& ) const override { reflex_assert_message( "serialize to binary TBD" ) }
+
+        Instruments::InflationSwap const& m_inflation_swap;
+
+        shared_ptr<PricingContext const> m_pricing_context;
+
+        Date m_today;
+    };
+
+    return std::make_shared<LocalCurve const>( swap, pricing_context );
+}
+}
+
+
+--- Instrument.cpp ---
+#include "Instrument.h"
+
+#include "FloatingSpread.h"
+
+#include <reflex_platform/Assert.h>
+
+using std::optional;
+using std::shared_ptr;
+
+namespace RiskEvolution::Reflex::Cashflows
+{
+
+struct Instrument::Implementation
+{
+    Implementation( InstrumentId instrument_id, Date observation_date, optional<FloatingSpread> const& optional_floating_spread ) :
+        m_instrument_id( std::move( instrument_id ) ),
+        m_observation_date( observation_date ),
+        m_optional_floating_spread( optional_floating_spread )
+    {
+    }
+private:
+    friend struct Instrument;
+
+    InstrumentId m_instrument_id;
+    Date         m_observation_date;
+
+    optional<FloatingSpread> m_optional_floating_spread;
+};
+
+[[maybe_unused]] static void default_cashflow_instrument_constructed_check( shared_ptr<Instrument::Implementation const> const& implementation
+) { reflex_assert_with_message( implementation != nullptr, "Attempt to use default constructed cash flow instrument" ) }
+
+Instrument::Instrument( InstrumentId instrument_id, Date observation_date, optional<FloatingSpread> const& optional_floating_spread ) :
+    m_implementation( std::make_shared<Implementation>( std::move( instrument_id ), observation_date, optional_floating_spread ) )
+{
+}
+
+Instrument::Instrument( InstrumentId instrument_id, Date observation_date ) : Instrument( std::move( instrument_id ), observation_date, { } ) { }
+
+InstrumentId Instrument::instrument_id( ) const
+{
+    reflex_assert_invoke( default_cashflow_instrument_constructed_check, m_implementation )
+
+        return m_implementation->m_instrument_id;
+}
+
+Date Instrument::observation_date( ) const
+{
+    reflex_assert_invoke( default_cashflow_instrument_constructed_check, m_implementation )
+
+        return m_implementation->m_observation_date;
+}
+
+optional<FloatingSpread> Instrument::optional_floating_spread( ) const
+{
+    reflex_assert_invoke( default_cashflow_instrument_constructed_check, m_implementation )
+
+        return m_implementation->m_optional_floating_spread;
+}
+
+bool operator==( Instrument const& lhs, Instrument const& rhs )
+{
+    return lhs.instrument_id( ) == rhs.instrument_id( ) && lhs.observation_date( ) == rhs.observation_date( ) && lhs.optional_floating_spread( ) == rhs.optional_floating_spread( );
+}
+}
+
+
+--- LegGenerator.cpp ---
+#include "LegGenerator.h"
+
+#include <reflex_cashflow_generation_data/LegData.h>
+
+using std::vector;
+
+namespace RiskEvolution::Reflex::Cashflows::Generation
+{
+LegGenerator::LegGenerator( LegData const& leg_data ) : m_leg_data( leg_data ) { }
+
+vector<Cashflows::Cashflow>& LegGenerator::cashflows( )
+{
+    call_once(
+        once_flag,
+        [ & ]( )
+        {
+            this->generate( );
+        }
+    );
+
+    return m_cashflows;
+}
+
+void LegGenerator::generate( ) { }
+
+}
+
+--- MonteCarloTiming.cpp ---
+#include <test/Test.h>
+
+#include <reflex_monte_carlo/HestonLognormal.h>
+#include <reflex_monte_carlo/CEV.h>
+#include <reflex_monte_carlo/PathData.h>
+#include <reflex_monte_carlo/LocalVolatilityFunction.h>
+#include <reflex_analytic_calibration/CEV.h>
+#include <reflex_analytic_calibration/Heston.h>
+#include <reflex_math_basic/Moments.h>
+#include <reflex_math_basic/RandomNumberGenerators.h>
+
+using std::vector;
+
+namespace RiskEvolution::Reflex::Tests
+{
+TEST_CASE( "MonteCarloTiming_monte_carlo_timing_tests", "[MonteCarloTiming]" )
+{
+    double forward        = 102.0;
+    double time_to_expiry = 5.0;
+
+    MonteCarlo::PathData2D path_data;
+
+    Analytics::Heston::Calibration heston_parameters(
+        Analytics::Heston::Kappa( 2.0 ), Analytics::Heston::Theta( 0.09 ), Analytics::Heston::Omega( 1.0 ), Analytics::Heston::Rho( -0.3 ), Analytics::Heston::V0( 0.09 )
+    );
+    Analytics::CEV::Calibration cev_parameters( Analytics::CEV::Alpha( 0.1 ), Analytics::CEV::Beta( 0.5 ) );
+
+    MonteCarlo::HestonLognormal monteCarlo( make_merssene_twister( 999 ), 1.0 / 365.0, 20000 );
+
+    std::clock_t startDirectPure = std::clock( );
+    path_data                    = monteCarlo.simulate( heston_parameters, forward, time_to_expiry );
+    std::clock_t endDirectPure   = clock( );
+    double  timeDirectPure       = static_cast<double>( endDirectPure - startDirectPure );
+
+    MonteCarlo::CEVLocalVolatilityFunction cevLocalVolatilityFunction( cev_parameters );
+    clock_t                                startTimeFunction = clock( );
+    path_data                                                = monteCarlo.simulate( heston_parameters, forward, time_to_expiry, cevLocalVolatilityFunction );
+    clock_t endTimeFunction                                  = clock( );
+    double  timeFunction                                     = static_cast<double>( endTimeFunction - startTimeFunction );
+
+    clock_t startDirectMix = std::clock( );
+    path_data              = monteCarlo.simulate_heston_with_cev_local_volatility( heston_parameters, cev_parameters, forward, time_to_expiry );
+    clock_t endDirectMix   = std::clock( );
+    double  timeDirectMix  = static_cast<double>( endDirectMix - startDirectMix );
+
+    REQUIRE( timeDirectPure == Catch::Approx(timeFunction ).margin( 20.0 ) );
+    REQUIRE( timeDirectPure == Catch::Approx(timeDirectMix ).margin( 20.0 ) );
+
+    // Result : Using function increases Monte-Carlo by ~ 1 millisecond
+}
+
+TEST_CASE( "MonteCarloTiming_monte_carlo_heston_cev_underlying_tests", "[MonteCarloTiming]" )
+{
+    /* Link error
+        double forward      = 102.0;
+        double time_to_expiry = 5.0;
+
+        MonteCarloPathData2D path_data;
+
+        Heston::Calibration heston_parameters( 2.0, 0.09, 1, -0.3, 0.09 );
+        CEV::Calibration        cev_parameters( 0.1, 0.5 );
+
+        Models::HestonLognormal hestonLognormal( heston_parameters );
+
+        MonteCarloHestonLognormal monteCarlo( make_merssene_twister( 999 ), 1.0 / 365.0, 20000 );
+
+        path_data  = monteCarlo.simulate( heston_parameters , forward,  time_to_expiry );
+        double meanHestonPure = mean( path_data.second );
+
+        MonteCarloCEVLocalVolatilityFunction cevLocalVolatilityFunction( cev_parameters );
+        path_data  = monteCarlo.simulate( heston_parameters , forward,  time_to_expiry, cevLocalVolatilityFunction );
+        double meanHestonFunction = mean( path_data.second );
+
+
+        path_data  = monteCarlo.simulateHestonWithCEVLocalVolatility( heston_parameters , cev_parameters, forward,  time_to_expiry );
+        double meanHestonMix = mean( path_data.second );
+
+        REQUIRE( meanHestonPure  == Catch::Approx(meanHestonFunction ).margin( 1.0 ) );
+        REQUIRE( meanHestonPure  == Catch::Approx(meanHestonMix ).margin( 1.0 ) );
+    */
+}
+
+}
+
+
+--- PricingContext.cpp ---
+#include "PricingContext.h"
+
+namespace RiskEvolution::Reflex
+{
+using std::span;
+using std::vector;
+
+vector<double> PricingContext::instrument_value( InstrumentId const& instrument_id, std::span<Date const> observation_dates ) const
+{
+    if( observation_dates.empty( ) == true ) return { };
+
+    vector<double> rates( observation_dates.size( ) );
+
+    instrument_value( instrument_id, { observation_dates, { rates } } );
+
+    return rates;
+}
+
+double instrument_value( PricingContext const& pricing_context, InstrumentId const& instrument_id, Date date )
+{
+    double result;
+
+    pricing_context.instrument_value( instrument_id, span_pair<Date const, double>( { &date, 1 }, { &result, 1 } ) );
+
+    return result;
+}
+
+}
+
+--- settings.json ---
+// Place your settings in this file to overwrite default and user settings. 
+{
+    // Controls if quick suggestions should show up while typing
+    "editor.quickSuggestions": { "other": false, "comments": false, "strings": false },
+
+    // Controls if suggestions should be accepted with "Enter" - in addition to "Tab". Helps to avoid ambiguity between inserting new lines and accepting suggestions.
+    "editor.acceptSuggestionOnEnter": "off",
+
+    // Controls the delay in ms after which quick suggestions will show up.
+    "editor.quickSuggestionsDelay": 10,
+
+    // Enable word based suggestions
+    "editor.wordBasedSuggestions": false
+}
+
+--- TestMonotoneSpline.cpp ---
+#include <boost/test/unit_test.hpp>
+
+#include <reflex_math/ConvexMonotoneInterpolator.h>
+#include <reflex_math_basics/XYCurve.h>
+#include <map>
+
+using namespace RiskEvolution::Reflex;
+
+using std::vector;
+
+BOOST_AUTO_TEST_SUITE( monotone )
+
+BOOST_AUTO_TEST_CASE( convex_monotone_spline_interpolator_discrete_calculations )
+{
+    XYCurveD inputPoints;
+
+    inputPoints.push_back( 0.1, 0.081 );
+    inputPoints.push_back( 1.0, 0.07 );
+    inputPoints.push_back( 4.0, 0.044 );
+    inputPoints.push_back( 9.0, 0.07 );
+    inputPoints.push_back( 20.0, 0.04 );
+    inputPoints.push_back( 30.0, 0.03 );
+
+    ConvexMonotone::Interpolator spline( inputPoints );
+
+    std::vector<double> interpolationDiscreteForwards = spline.getDiscreteForwards( );
+
+    std::vector<double> interpolationForwards = spline.getForwards( );
+
+    // std::vector<double> interpolationPoints;
+
+    // double interpolationPoint = 0.0;
+
+    // for( size_t interpolationPointsCounter = 0; interpolationPointsCounter != inputPoints.size( ); interpolationPointsCounter++ )
+    //{
+    //     interpolationPoints.push_back( interpolationPoint );
+
+    //    interpolationPoint += 0.05;
+    //}
+
+    std::vector<double> testDiscreteAverageForwards;
+
+    testDiscreteAverageForwards.push_back( 0.0 );
+    testDiscreteAverageForwards.push_back( 0.08100000 );
+    testDiscreteAverageForwards.push_back( 0.06877778 );
+    testDiscreteAverageForwards.push_back( 0.03533333 );
+    testDiscreteAverageForwards.push_back( 0.09080000 );
+    testDiscreteAverageForwards.push_back( 0.01545455 );
+    testDiscreteAverageForwards.push_back( 0.01000000 );
+
+    std::vector<double> testDiscreteForwards;
+
+    testDiscreteForwards.push_back( 0.081611111 );
+    testDiscreteForwards.push_back( 0.079777778 );
+    testDiscreteForwards.push_back( 0.061059829 );
+    testDiscreteForwards.push_back( 0.056133333 );
+    testDiscreteForwards.push_back( 0.067254545 );
+    testDiscreteForwards.push_back( 0.012597403 );
+    testDiscreteForwards.push_back( 0.008701299 );
+
+    for( size_t testDiscreteCounter = 0; testDiscreteCounter != testDiscreteAverageForwards.size( ); testDiscreteCounter++ )
+    {
+        BOOST_CHECK_CLOSE( testDiscreteAverageForwards[ testDiscreteCounter ], interpolationDiscreteForwards[ testDiscreteCounter ], 1 );
+    }
+    for( size_t testDiscreteCounter = 0; testDiscreteCounter != testDiscreteAverageForwards.size( ); testDiscreteCounter++ )
+    {
+        BOOST_CHECK_CLOSE( testDiscreteForwards[ testDiscreteCounter ], interpolationForwards[ testDiscreteCounter ], 1 );
+    }
+}
+
+BOOST_AUTO_TEST_CASE( convex_monotone_spline_interpolator_interpolations )
+{
+    XYCurveD inputPoints;
+
+    inputPoints.push_back( 0.1, 0.081 );
+    inputPoints.push_back( 1.0, 0.07 );
+    inputPoints.push_back( 4.0, 0.044 );
+    inputPoints.push_back( 9.0, 0.07 );
+    inputPoints.push_back( 20.0, 0.04 );
+    inputPoints.push_back( 30.0, 0.03 );
+
+    ConvexMonotone::Interpolator spline( inputPoints );
+
+    std::vector<double> targetXValues;
+
+    targetXValues.push_back( 0.1 );
+    targetXValues.push_back( 0.2 );
+    targetXValues.push_back( 0.45 );
+    targetXValues.push_back( 0.9 );
+    targetXValues.push_back( 1.0 );
+    targetXValues.push_back( 4.0 );
+    targetXValues.push_back( 9.0 );
+    targetXValues.push_back( 20.0 );
+    targetXValues.push_back( 30.0 );
+
+    std::vector<double> yValues = spline.interpolate( targetXValues );
+
+    std::vector<double> expectedYValues;
+
+    expectedYValues.push_back( 0.079777778 );
+    expectedYValues.push_back( 0.076725546 );
+    expectedYValues.push_back( 0.070158594 );
+    expectedYValues.push_back( 0.062167141 );
+    expectedYValues.push_back( 0.061059829 );
+    expectedYValues.push_back( 0.056133333 );
+    expectedYValues.push_back( 0.067254545 );
+    expectedYValues.push_back( 0.012597403 );
+    expectedYValues.push_back( 0.008701299 );
+
+    BOOST_CHECK_EQUAL( yValues.size( ), expectedYValues.size( ) );
+
+    for( size_t testDiscreteCounter = 0; testDiscreteCounter != expectedYValues.size( ); testDiscreteCounter++ )
+    {
+        BOOST_CHECK_CLOSE( expectedYValues[ testDiscreteCounter ], yValues[ testDiscreteCounter ], 0.01 );
+    }
+}
+
+BOOST_AUTO_TEST_CASE( convex_monotone_spline_bounds )
+{
+    XYCurveD inputPoints;
+
+    inputPoints.push_back( 0.1, 0.02 );
+    inputPoints.push_back( 1.0, 0.02 );
+    inputPoints.push_back( 2.0, 0.02 );
+    inputPoints.push_back( 6.0, 0.03 );
+    inputPoints.push_back( 7.0, 0.02 );
+    inputPoints.push_back( 30.0, 0.02 );
+
+    ConvexMonotone::Interpolator spline( inputPoints );
+
+    vector<double> targetXValues;
+
+    for( size_t i = 0; i < inputPoints.size( ); i++ )
+    {
+        targetXValues.push_back( 1.5 * inputPoints.getXValues( ).at( i ) );
+    }
+
+    // Extrapolation test flag. If this is switched on the current interpolation is expected to assert.
+    bool extraTest = true;
+    if( extraTest )
+    {
+        targetXValues.push_back( 1.5 * targetXValues.back( ) );
+
+        // Add at the this point the values for the front extrapolation.
+        targetXValues.insert( targetXValues.begin( ), 0.5 * targetXValues.front( ) );
+        targetXValues.insert( targetXValues.begin( ), 0.5 * targetXValues.front( ) );
+    }
+
+    std::vector<double> yValues;
+    BOOST_CHECK_NO_THROW( yValues = spline.interpolate( targetXValues ) );
+
+    size_t n = targetXValues.size( );
+    for( size_t i = 0; i != n; i++ )
+    {
+        if( i < ( n - 1 ) )
+        {
+            BOOST_CHECK_CLOSE( yValues.at( i ), spline.interpolate( targetXValues.at( i ) ), 0.5 );
+        }
+        else
+        {
+            double y1 = 0.0;
+            BOOST_CHECK_NO_THROW( y1 = spline.interpolate( targetXValues.at( i ) ) );
+
+            BOOST_CHECK_CLOSE( yValues.at( i ), y1, 0.5 );
+        }
+    }
+}
+
+BOOST_AUTO_TEST_CASE( convex_monotone_spline_rates )
+{
+    XYCurveD inputPoints;
+
+    inputPoints.push_back( 1, 0.03 );
+    inputPoints.push_back( 2, 0.04 );
+    inputPoints.push_back( 3, 0.047 );
+    inputPoints.push_back( 4, 0.06 );
+    inputPoints.push_back( 5, 0.06 );
+
+    ConvexMonotone::Interpolator spline( inputPoints );
+
+    XYCurveD expectedCurve;
+
+    expectedCurve.push_back( 0.2, 2.520 / 100.0 );
+    expectedCurve.push_back( 0.47, 2.610 / 100.0 );
+    expectedCurve.push_back( 4.37, 6.085 / 100.0 );
+    expectedCurve.push_back( 4.76, 6.046 / 100.0 );
+    expectedCurve.push_back( 4.77, 6.045 / 100.0 );
+
+    // Bounds value check for the convex monotone spline.
+    expectedCurve.push_back( 5.0, 6.000 / 100.0 );
+
+    expectedCurve.push_back( 5.19, 5.964 / 100.0 );
+
+    std::vector<double> yValues = spline.interpolateRates( expectedCurve.getXValues( ) );
+
+    for( size_t i = 0; i < inputPoints.getXValues( ).size( ); i++ )
+    {
+        BOOST_CHECK_CLOSE( yValues.at( i ), expectedCurve.getYValues( ).at( i ), 0.5 );
+    }
+}
+
+BOOST_AUTO_TEST_CASE( convex_monotone_spline_forwards )
+{
+    XYCurveD inputPoints;
+
+    inputPoints.push_back( 1, 0.03 );
+    inputPoints.push_back( 2, 0.04 );
+    inputPoints.push_back( 3, 0.047 );
+    inputPoints.push_back( 4, 0.06 );
+    inputPoints.push_back( 5, 0.06 );
+
+    ConvexMonotone::Interpolator spline( inputPoints );
+
+    XYCurveD expectedCurve;
+
+    expectedCurve.push_back( 0.2, 2.560 / 100.0 );
+    expectedCurve.push_back( 0.47, 2.831 / 100.0 );
+    expectedCurve.push_back( 4.37, 6.186 / 100.0 );
+    expectedCurve.push_back( 4.76, 5.193 / 100.0 );
+
+    expectedCurve.push_back( 5.19, 5.025 / 100.0 );
+
+    std::vector<double> yValues = spline.interpolate( expectedCurve.getXValues( ) );
+
+    for( size_t i = 0; i < inputPoints.getXValues( ).size( ); i++ )
+    {
+        BOOST_CHECK_CLOSE( yValues.at( i ), expectedCurve.getYValues( ).at( i ), 0.5 );
+    }
+}
+
+BOOST_AUTO_TEST_SUITE_END( ) 
